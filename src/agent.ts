@@ -3,6 +3,11 @@ import chalk from "chalk";
 import { DEFINITIONS, dispatch } from "./tools";
 import { confirm } from "./tools/bash";
 import { getMode } from "./mode";
+import {
+  snipCompact, microCompact, toolResultBudget,
+  compactHistory, reactiveCompact,
+  estimateSize, CONTEXT_LIMIT,
+} from "./compaction";
 
 export const DEFAULT_MODEL = "deepseek-chat";
 
@@ -43,8 +48,43 @@ export class Session {
   // ── private ────────────────────────────────────────────────────────────────
 
   private async runLoop(): Promise<void> {
+    // reactive compact 最多重试一次，防止无限循环
+    let reactiveRetries = 0;
+
     while (true) {
-      const { content, toolCalls, finishReason } = await this.callApi();
+      // ── 压缩流水线（每次调 API 前执行，便宜的先跑）──────────────────────────
+      // 顺序固定：L3 budget → L1 snip → L2 micro
+      // L3 必须在 L2 前，否则 L2 会先把内容替换成占位符，L3 就没东西可持久化了
+      this.messages = toolResultBudget(this.messages);  // L3: 大结果持久化到磁盘
+      this.messages = snipCompact(this.messages);        // L1: 裁剪中间消息
+      this.messages = microCompact(this.messages);       // L2: 旧工具结果替换占位符
+
+      // L4: 体积还超限则调 LLM 做摘要（有 API 开销，放最后）
+      if (estimateSize(this.messages) > CONTEXT_LIMIT) {
+        console.log(chalk.dim("[auto compact 触发]"));
+        this.messages = await compactHistory(this.messages, this.client, this.model);
+      }
+
+      // ── 调用 API ──────────────────────────────────────────────────────────
+      let result: Awaited<ReturnType<typeof this.callApi>>;
+      try {
+        result = await this.callApi();
+        reactiveRetries = 0; // 成功后重置重试计数
+      } catch (err: any) {
+        // prompt_too_long：触发兜底压缩后重试一次
+        const isOverLimit =
+          err?.message?.toLowerCase().includes("prompt_too_long") ||
+          err?.message?.toLowerCase().includes("too many tokens");
+
+        if (isOverLimit && reactiveRetries < 1) {
+          this.messages = await reactiveCompact(this.messages, this.client, this.model);
+          reactiveRetries++;
+          continue;
+        }
+        throw err;
+      }
+
+      const { content, toolCalls, finishReason } = result;
 
       if (toolCalls.length > 0) {
         // Assistant message must include tool_calls when they exist
