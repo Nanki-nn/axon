@@ -1,5 +1,6 @@
-import { execSync, spawnSync } from "child_process";
+import { execSync } from "child_process";
 import chalk from "chalk";
+import { getMode } from "../mode";
 
 export const DEFINITION = {
   type: "function" as const,
@@ -18,10 +19,11 @@ export const DEFINITION = {
   },
 };
 
+// 需要二次确认的危险命令特征
 const DANGEROUS = ["rm -rf", "sudo rm", "dd if=", "> /dev/", "mkfs", ":(){:|:&};:"];
 
-function confirm(question: string): Promise<boolean> {
-  // Inline confirm without extra deps
+/** 向用户提问，返回是否确认（y 开头视为 yes） */
+export function confirm(question: string): Promise<boolean> {
   process.stdout.write(question + " (y/N) ");
   return new Promise((resolve) => {
     process.stdin.setEncoding("utf-8");
@@ -34,9 +36,10 @@ function confirm(question: string): Promise<boolean> {
 export async function execute(command: string): Promise<string> {
   console.log(chalk.yellow(`\n$ ${command}`));
 
-  if (DANGEROUS.some((p) => command.includes(p))) {
-    const ok = await confirm(chalk.red("This looks dangerous. Execute?"));
-    if (!ok) return "Command cancelled by user.";
+  // yolo 模式跳过所有确认，其他模式对危险命令弹出提示
+  if (getMode() !== "yolo" && DANGEROUS.some((p) => command.includes(p))) {
+    const ok = await confirm(chalk.red("⚠ 危险命令，确认执行？"));
+    if (!ok) return "用户取消了执行。";
   }
 
   try {

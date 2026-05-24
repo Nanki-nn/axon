@@ -4,6 +4,8 @@ import { config } from "dotenv";
 import { Command } from "commander";
 import chalk from "chalk";
 import { Session, DEFAULT_MODEL } from "./agent";
+import { loadAgentsContext } from "./context";
+import { setMode } from "./mode";
 
 config();
 
@@ -49,9 +51,25 @@ program
   .name("axon")
   .description("AI coding assistant powered by Claude")
   .argument("[prompt]", "Prompt to send (omit for interactive REPL)")
-  .option("-m, --model <model>", "Claude model to use", DEFAULT_MODEL)
-  .action(async (prompt: string | undefined, options: { model: string }) => {
-    const session = new Session(getApiKey(), options.model);
+  .option("-m, --model <model>", "使用的模型", DEFAULT_MODEL)
+  .option("--yolo", "跳过所有确认，直接执行（包括危险命令）")
+  .option("--plan", "每轮工具调用前展示计划，等待用户确认后再执行")
+  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean }) => {
+    // 根据 flag 设置执行模式，yolo 和 plan 互斥，yolo 优先
+    if (options.yolo) {
+      setMode("yolo");
+      console.log(chalk.red("⚡ YOLO 模式：跳过所有确认"));
+    } else if (options.plan) {
+      setMode("plan");
+      console.log(chalk.yellow("📋 Plan 模式：执行前需确认"));
+    }
+    // 启动时扫描 AGENTS.md，有内容则提示用户
+    const agentsContext = loadAgentsContext();
+    if (agentsContext) {
+      console.log(chalk.dim("✓ 已加载项目上下文 (AGENTS.md)"));
+    }
+
+    const session = new Session(getApiKey(), options.model, agentsContext);
     if (prompt) {
       await session.chat(prompt);
     } else {
