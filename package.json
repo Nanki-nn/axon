@@ -1,0 +1,26 @@
+{
+  "name": "axon-cli",
+  "version": "0.1.0",
+  "description": "A minimal AI coding assistant powered by DeepSeek",
+  "main": "dist/cli.js",
+  "bin": {
+    "axon": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "openai": "^4.77.0",
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.0",
+    "glob": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
