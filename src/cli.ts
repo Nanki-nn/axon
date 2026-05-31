@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import * as readline from "readline";
+import * as path from "path";
 import { config } from "dotenv";
 import { Command } from "commander";
 import chalk from "chalk";
 import { Session, DEFAULT_MODEL } from "./agent";
 import { loadAgentsContext } from "./context";
 import { setMode } from "./mode";
+import { SkillLoader } from "./skills";
+import { setSkillLoader } from "./tools";
 
 config();
 
@@ -63,13 +66,21 @@ program
       setMode("plan");
       console.log(chalk.yellow("📋 Plan 模式：执行前需确认"));
     }
+    // 启动时扫描 .agents/skills/，把 SkillLoader 注入工具分发层
+    const skillsDir = path.join(process.cwd(), ".agents", "skills");
+    const loader = new SkillLoader(skillsDir);
+    setSkillLoader(loader);
+    if (loader.size > 0) {
+      console.log(chalk.dim(`✓ 已加载 ${loader.size} 个 skills (${loader.names().join(", ")})`));
+    }
+
     // 启动时扫描 AGENTS.md，有内容则提示用户
     const agentsContext = loadAgentsContext();
     if (agentsContext) {
       console.log(chalk.dim("✓ 已加载项目上下文 (AGENTS.md)"));
     }
 
-    const session = new Session(getApiKey(), options.model, agentsContext);
+    const session = new Session(getApiKey(), options.model, agentsContext, loader.getDescriptions());
     if (prompt) {
       await session.chat(prompt);
     } else {

@@ -3,3 +3,6 @@ node_modules/
 dist/
 *.js.map
 .idea/
+.agents/
+.transcripts/
+skills-lock.json

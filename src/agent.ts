@@ -27,17 +27,26 @@ export class Session {
   // 最终注入给模型的 system prompt（基础 + 项目上下文）
   private systemPrompt: string;
 
-  constructor(apiKey: string, model: string = DEFAULT_MODEL, agentsContext: string = "") {
+  constructor(
+    apiKey: string,
+    model: string = DEFAULT_MODEL,
+    agentsContext: string = "",
+    skillDescriptions: string = "",
+  ) {
     this.client = new OpenAI({
       apiKey,
       baseURL: "https://api.deepseek.com",
     });
     this.model = model;
 
-    // 如果发现了 AGENTS.md 内容，拼接到 system prompt 末尾
-    this.systemPrompt = agentsContext
-      ? `${BASE_SYSTEM_PROMPT}\n\n## 项目上下文（来自 AGENTS.md）\n${agentsContext}`
-      : BASE_SYSTEM_PROMPT;
+    let prompt = BASE_SYSTEM_PROMPT;
+    if (skillDescriptions) {
+      prompt += `\n\n## Skills available\nUse load_skill(<name>) to get full instructions before tackling a matching task.\n${skillDescriptions}`;
+    }
+    if (agentsContext) {
+      prompt += `\n\n## 项目上下文（来自 AGENTS.md）\n${agentsContext}`;
+    }
+    this.systemPrompt = prompt;
   }
 
   async chat(userMessage: string): Promise<void> {
@@ -50,7 +59,6 @@ export class Session {
   private async runLoop(): Promise<void> {
     // reactive compact 最多重试一次，防止无限循环
     let reactiveRetries = 0;
-
     while (true) {
       // ── 压缩流水线（每次调 API 前执行，便宜的先跑）──────────────────────────
       // 顺序固定：L3 budget → L1 snip → L2 micro
