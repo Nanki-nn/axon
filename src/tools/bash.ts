@@ -20,7 +20,11 @@ export const DEFINITION = {
 };
 
 // 需要二次确认的危险命令特征
-const DANGEROUS = ["rm -rf", "sudo rm", "dd if=", "> /dev/", "mkfs", ":(){:|:&};:"];
+const DANGEROUS = [
+  "rm -rf", "sudo rm", "dd if=", "> /dev/", "mkfs", ":(){:|:&};:",
+  "curl | bash", "curl|bash", "wget -O- |", "wget -qO- |",
+  "wget -O - |", "| bash", "| sh",
+];
 
 /** 向用户提问，返回是否确认（y 开头视为 yes） */
 export function confirm(question: string): Promise<boolean> {

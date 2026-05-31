@@ -114,6 +114,16 @@ export function editFile(path: string, oldString: string, newString: string): st
     if (!original.includes(oldString)) {
       return `Error: old_string not found in ${path}`;
     }
+    // Count occurrences to detect ambiguous replacements
+    let count = 0;
+    let searchIdx = 0;
+    while ((searchIdx = original.indexOf(oldString, searchIdx)) !== -1) {
+      count++;
+      searchIdx += oldString.length;
+    }
+    if (count > 1) {
+      return `Error: old_string appears ${count} times in ${path}. Provide more surrounding context to make the match unique.`;
+    }
     writeFileSync(path, original.replace(oldString, newString), "utf-8");
     return `Edited ${path}`;
   } catch (err: any) {

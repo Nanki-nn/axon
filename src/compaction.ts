@@ -87,6 +87,8 @@ export function microCompact(messages: Message[]): Message[] {
 
     const content = typeof msg.content === "string" ? msg.content : "";
     if (content.length <= 120) return msg; // 太短了不值得压缩
+    // Skill content must persist for the entire session — never compact it
+    if (content.startsWith("<skill name=")) return msg;
 
     return { ...msg, content: "[早期工具结果已压缩，如需重新获取请再次调用工具]" };
   });
