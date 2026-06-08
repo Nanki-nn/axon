@@ -3,6 +3,8 @@ import { dirname } from "path";
 import { spawnSync } from "child_process";
 import { globSync } from "glob";
 
+// ── 工具定义（OpenAI function calling 格式，传给 LLM）─────────────────────────
+
 export const READ_DEFINITION = {
   type: "function" as const,
   function: {
@@ -90,6 +92,9 @@ export const SEARCH_DEFINITION = {
   },
 };
 
+// ── 工具实现 ──────────────────────────────────────────────────────────────────
+
+/** 读取文件内容，出错时返回错误信息字符串而非抛出异常 */
 export function readFile(path: string): string {
   try {
     return readFileSync(path, "utf-8");
@@ -98,6 +103,7 @@ export function readFile(path: string): string {
   }
 }
 
+/** 写入文件，自动创建父目录，返回写入字节数确认 */
 export function writeFile(path: string, content: string): string {
   try {
     mkdirSync(dirname(path), { recursive: true });
@@ -108,13 +114,17 @@ export function writeFile(path: string, content: string): string {
   }
 }
 
+/**
+ * 精确字符串替换：要求 old_string 在文件中有且只有一处匹配。
+ * 多处匹配时报错（需要 LLM 提供更多上下文来唯一定位），避免误改。
+ */
 export function editFile(path: string, oldString: string, newString: string): string {
   try {
     const original = readFileSync(path, "utf-8");
     if (!original.includes(oldString)) {
       return `Error: old_string not found in ${path}`;
     }
-    // Count occurrences to detect ambiguous replacements
+    // 统计出现次数，超过 1 次时拒绝执行
     let count = 0;
     let searchIdx = 0;
     while ((searchIdx = original.indexOf(oldString, searchIdx)) !== -1) {
@@ -131,13 +141,17 @@ export function editFile(path: string, oldString: string, newString: string): st
   }
 }
 
+/** 使用 glob 模式列举文件，结果按字母排序 */
 export function listFiles(pattern: string): string {
   const matches = globSync(pattern);
   return matches.length ? matches.sort().join("\n") : `No files matched: ${pattern}`;
 }
 
+/**
+ * 用 grep 在指定目录/文件中搜索正则。
+ * 使用 spawnSync 而不是 execSync，避免用户提供的 pattern 造成 shell 注入。
+ */
 export function searchFiles(pattern: string, searchPath: string = "."): string {
-  // Use spawnSync to avoid shell injection from user-supplied pattern
   const result = spawnSync("grep", ["-rn", pattern, searchPath], {
     encoding: "utf-8",
     timeout: 15_000,

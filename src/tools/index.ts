@@ -5,15 +5,23 @@ import {
 } from "./files";
 import { SkillLoader } from "../skills";
 
+// 当前会话的技能加载器，由 cli.ts 在启动时注入
 let skillLoader: SkillLoader | null = null;
-// MCP dispatch registry: tool name → dispatch function
+
+// MCP 工具注册表：工具全名（serverName__toolName）→ 调用函数
 const mcpDispatchers = new Map<string, (input: Record<string, string>) => Promise<string>>();
+// MCP 工具的 OpenAI function definition 列表（动态追加到 DEFINITIONS）
 const mcpDefinitions: object[] = [];
 
+/** 注入技能加载器（仅在 cli.ts 启动阶段调用一次） */
 export function setSkillLoader(loader: SkillLoader): void {
   skillLoader = loader;
 }
 
+/**
+ * 注册一个来自 MCP 服务端的工具。
+ * definition 遵循 OpenAI function calling 格式，dispatcher 负责实际调用。
+ */
 export function registerMcpTool(
   definition: object,
   dispatcher: (input: Record<string, string>) => Promise<string>,
@@ -25,6 +33,8 @@ export function registerMcpTool(
     mcpDispatchers.set(name, dispatcher);
   }
 }
+
+// ── 技能工具定义（供 LLM 发现和调用技能） ─────────────────────────────────────
 
 const SKILL_LIST_DEFINITION = {
   type: "function" as const,
@@ -54,6 +64,10 @@ const SKILL_READ_DEFINITION = {
   },
 };
 
+/**
+ * 返回当前所有工具的定义列表（内置工具 + 动态注册的 MCP 工具）。
+ * 每次调用都重新构建，确保 MCP 工具注册后能被包含进来。
+ */
 export function getDEFINITIONS(): object[] {
   return [
     BASH_DEF,
@@ -68,7 +82,11 @@ export function getDEFINITIONS(): object[] {
   ];
 }
 
-// Keep backward-compatible export that works before MCP is registered
+/**
+ * DEFINITIONS 是一个 Proxy，让 agent.ts 可以在 MCP 工具注册前就持有引用，
+ * 同时在每次访问时动态获取最新的工具列表。
+ * 兼容 Array 访问模式（下标、length、迭代方法等）。
+ */
 export const DEFINITIONS = new Proxy([] as object[], {
   get(_, prop) {
     if (prop === "length") return getDEFINITIONS().length;
@@ -81,12 +99,17 @@ export const DEFINITIONS = new Proxy([] as object[], {
 
 type ToolInput = Record<string, string>;
 
+/**
+ * 工具调用分发器：根据工具名找到对应的执行函数并调用。
+ * MCP 工具优先（动态注册），其次是内置工具。
+ */
 export async function dispatch(name: string, input: ToolInput): Promise<string> {
-  // MCP tools are registered dynamically
+  // 先查 MCP 注册表（动态注册的工具）
   if (mcpDispatchers.has(name)) {
     return mcpDispatchers.get(name)!(input);
   }
 
+  // 内置工具按名称分发
   switch (name) {
     case "bash":         return bashExecute(input.command);
     case "read_file":    return readFile(input.path);

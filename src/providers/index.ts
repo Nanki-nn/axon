@@ -7,6 +7,10 @@ export interface ProviderConfig {
   baseURL?: string;
 }
 
+/**
+ * 各提供商的默认端点和模型。
+ * 所有非 Anthropic 提供商都兼容 OpenAI SDK（使用 compatible-mode 或原生支持）。
+ */
 const PROVIDER_DEFAULTS: Record<string, { baseURL: string; defaultModel: string }> = {
   deepseek: { baseURL: "https://api.deepseek.com", defaultModel: "deepseek-chat" },
   openai:   { baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o" },
@@ -16,17 +20,16 @@ const PROVIDER_DEFAULTS: Record<string, { baseURL: string; defaultModel: string 
 };
 
 /**
- * Resolve ${ENV_VAR} references in the apiKey field.
- * This lets axon.config.json reference environment variables safely.
+ * 解析 apiKey 字段中的环境变量引用（如 ${DEEPSEEK_API_KEY}）。
+ * 只支持整个字段是单个变量引用的写法，不做嵌套替换。
  */
 function resolveApiKey(raw: string): string {
   return raw.replace(/^\$\{(\w+)\}$/, (_, name) => process.env[name] ?? raw);
 }
 
 /**
- * Factory that creates an OpenAI-compatible client for the given provider.
- * For Anthropic, returns a special adapter (see ./anthropic.ts).
- * All others use the OpenAI SDK pointed at the provider's compatible endpoint.
+ * 根据 ProviderConfig 创建 OpenAI 兼容的 LLM 客户端。
+ * Anthropic 的适配器由 ./anthropic.ts 单独处理，不走此函数。
  */
 export function createClient(config: ProviderConfig): { client: OpenAI; model: string; baseURL: string } {
   const apiKey = resolveApiKey(config.apiKey);
@@ -38,7 +41,13 @@ export function createClient(config: ProviderConfig): { client: OpenAI; model: s
   return { client, model, baseURL };
 }
 
-/** Parse a --model flag like "anthropic:claude-3-5-sonnet" or plain "deepseek-chat" */
+/**
+ * 解析 --model 参数，支持两种格式：
+ *   - "anthropic:claude-3-5-sonnet" → { provider: "anthropic", model: "claude-3-5-sonnet" }
+ *   - "deepseek-chat"               → { provider: null, model: "deepseek-chat" }
+ *
+ * provider 为 null 时，使用配置文件或默认值中的 provider。
+ */
 export function parseModelFlag(flag: string): { provider: string | null; model: string } {
   const colonIdx = flag.indexOf(":");
   if (colonIdx === -1) return { provider: null, model: flag };

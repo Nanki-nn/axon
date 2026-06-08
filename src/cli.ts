@@ -20,19 +20,21 @@ import { initMcpServers, McpServerConfig } from "./mcp";
 import { createClient, parseModelFlag, ProviderConfig } from "./providers";
 import { createAnthropicAdapter } from "./providers/anthropic";
 
+// 加载 .env 文件中的环境变量（如 DEEPSEEK_API_KEY）
 config();
 
-// ── axon.config.json ──────────────────────────────────────────────────────────
+// ── axon.config.json 配置文件结构 ─────────────────────────────────────────────
 
 interface AxonConfig {
-  provider?: string;
-  model?: string;
-  apiKey?: string;
-  baseURL?: string;
-  mcpServers?: Record<string, McpServerConfig>;
-  plugins?: string[];
+  provider?: string;                         // 提供商名称（deepseek/openai/anthropic 等）
+  model?: string;                            // 模型名称
+  apiKey?: string;                           // API Key，支持 ${ENV_VAR} 语法
+  baseURL?: string;                          // 自定义端点（覆盖默认值）
+  mcpServers?: Record<string, McpServerConfig>; // MCP 服务端配置
+  plugins?: string[];                        // 自定义插件路径列表
 }
 
+/** 读取单个 JSON 配置文件，失败时返回空对象 */
 function readConfig(filePath: string): AxonConfig {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf-8")) as AxonConfig;
@@ -41,24 +43,34 @@ function readConfig(filePath: string): AxonConfig {
   }
 }
 
+/**
+ * 合并全局配置（~/.axon/config.json）和项目配置（./axon.config.json）。
+ * 项目配置优先级更高，mcpServers 和 plugins 做深度合并（不覆盖，而是追加）。
+ */
 function loadAxonConfig(): AxonConfig {
   const globalConfig = readConfig(path.join(os.homedir(), ".axon", "config.json"));
   const localConfig = readConfig(path.join(process.cwd(), "axon.config.json"));
   return {
     ...globalConfig,
-    ...localConfig,
+    ...localConfig, // 局部配置覆盖全局配置
     mcpServers: { ...globalConfig.mcpServers, ...localConfig.mcpServers },
     plugins: [...(globalConfig.plugins ?? []), ...(localConfig.plugins ?? [])],
   };
 }
 
-// ── API key resolution ────────────────────────────────────────────────────────
+// ── API Key 解析 ───────────────────────────────────────────────────────────────
 
+/**
+ * 获取指定提供商的 API Key，查找优先级：
+ *   1. 配置文件中的 apiKey 字段（支持 ${ENV_VAR} 引用）
+ *   2. 对应的环境变量（如 DEEPSEEK_API_KEY）
+ *   找不到时打印错误并退出
+ */
 function getApiKey(provider: string, configKey?: string): string {
-  // Config file key takes precedence (supports ${ENV_VAR} syntax — resolved by createClient)
+  // 配置文件中指定的 key 优先（${ENV_VAR} 语法由 createClient 解析）
   if (configKey) return configKey;
 
-  // Fall back to provider-specific env vars
+  // 各提供商对应的环境变量名
   const envMap: Record<string, string> = {
     deepseek: "DEEPSEEK_API_KEY",
     openai:   "OPENAI_API_KEY",
@@ -77,8 +89,12 @@ function getApiKey(provider: string, configKey?: string): string {
   return key;
 }
 
-// ── REPL ─────────────────────────────────────────────────────────────────────
+// ── REPL（交互式循环）─────────────────────────────────────────────────────────
 
+/**
+ * 启动交互式 REPL：循环读取用户输入，调用 session.chat()，直到用户退出。
+ * 支持 Ctrl+C、exit、quit、q 等方式退出。
+ */
 async function repl(session: Session): Promise<void> {
   console.log(`${chalk.cyan("axon")}  Ctrl+C or type ${chalk.dim("exit")} to quit\n`);
 
@@ -90,7 +106,7 @@ async function repl(session: Session): Promise<void> {
     try {
       input = await ask();
     } catch {
-      break;
+      break; // Ctrl+C 或 stdin 关闭时退出
     }
 
     input = input.trim();
@@ -102,11 +118,11 @@ async function repl(session: Session): Promise<void> {
   }
 
   rl.close();
-  await session.end();
+  await session.end(); // 触发 onSessionEnd 钩子
   console.log("Bye!");
 }
 
-// ── CLI ───────────────────────────────────────────────────────────────────────
+// ── CLI 命令定义（commander）─────────────────────────────────────────────────
 
 const program = new Command();
 
@@ -118,7 +134,7 @@ program
   .option("--yolo", "Skip all confirmations, execute directly")
   .option("--plan", "Show tool plan before each execution round, wait for user confirmation")
   .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean }) => {
-    // Mode flags
+    // 根据 flag 设置执行模式
     if (options.yolo) {
       setMode("yolo");
       console.log(chalk.red("⚡ YOLO 模式：跳过所有确认"));
@@ -127,17 +143,17 @@ program
       console.log(chalk.yellow("📋 Plan 模式：执行前需确认"));
     }
 
-    // Load config file
+    // 加载配置文件（全局 + 项目级合并）
     const axonConfig = loadAxonConfig();
 
-    // Parse model flag (supports "provider:model" syntax)
+    // 解析 --model 参数，支持 "provider:model" 格式
     const { provider: flagProvider, model: flagModel } = parseModelFlag(options.model);
 
-    // Determine provider + model
+    // 确定最终使用的 provider 和 model（flag > config > 默认值）
     const provider = flagProvider ?? axonConfig.provider ?? "deepseek";
     const model = (flagProvider ? flagModel : null) ?? axonConfig.model ?? flagModel ?? DEFAULT_MODEL;
 
-    // Build the LLM client
+    // 创建 LLM 客户端（Anthropic 走专属适配器，其余走 OpenAI 兼容接口）
     let client: OpenAI;
 
     if (provider === "anthropic") {
@@ -154,7 +170,7 @@ program
       client = created.client;
     }
 
-    // Skills
+    // 加载技能（.agents/skills/ 目录下的所有子目录）
     const skillsDir = path.join(process.cwd(), ".agents", "skills");
     const loader = new SkillLoader(skillsDir);
     setSkillLoader(loader);
@@ -162,24 +178,24 @@ program
       console.log(chalk.dim(`✓ 已加载 ${loader.size} 个 skills (${loader.names().join(", ")})`));
     }
 
-    // Project context (AGENTS.md)
+    // 加载项目上下文（从 git 根目录向 cwd 逐层查找 AGENTS.md）
     const agentsContext = loadAgentsContext();
     if (agentsContext) {
       console.log(chalk.dim("✓ 已加载项目上下文 (AGENTS.md)"));
     }
 
-    // Long-term memory
+    // 加载长期记忆（~/.axon/memory/memory.md，由 Dream 整合生成）
     const memoryContext = loadMemoryContext();
     if (memoryContext) {
       console.log(chalk.dim("✓ 已加载长期记忆"));
     }
 
-    // Hook system
+    // 初始化 Hook 系统，注册内置插件
     const hooks = new HookSystem();
-    hooks.register(new SessionCounterPlugin());
-    hooks.register(new AutoDreamPlugin(client, model));
+    hooks.register(new SessionCounterPlugin()); // 会话计数
+    hooks.register(new AutoDreamPlugin(client, model)); // 自动 Dream 整合
 
-    // Load user plugins from config
+    // 加载用户自定义插件（来自 axon.config.json 的 plugins 字段）
     if (axonConfig.plugins) {
       for (const pluginPath of axonConfig.plugins) {
         try {
@@ -193,12 +209,13 @@ program
       }
     }
 
-    // MCP servers
+    // 初始化 MCP 服务端（如果配置了的话）
     if (axonConfig.mcpServers && Object.keys(axonConfig.mcpServers).length > 0) {
       console.log(chalk.dim("✓ 初始化 MCP servers..."));
       await initMcpServers(axonConfig.mcpServers);
     }
 
+    // 创建 Agent 会话
     const session = new Session(
       /* apiKey only used for legacy path; client is set via overrideClient */ "",
       model,
@@ -210,9 +227,11 @@ program
     );
 
     if (prompt) {
+      // 非交互模式：执行单次对话后退出
       await session.chat(prompt);
       await session.end();
     } else {
+      // 交互模式：启动 REPL
       await repl(session);
     }
   });
