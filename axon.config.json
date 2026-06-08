@@ -2,19 +2,5 @@
   "provider": "deepseek",
   "model": "deepseek-chat",
   "apiKey": "sk-506ac87bce2a47ef946cccade6e72d3d",
-  "baseURL": "https://api.deepseek.com",
-
-  "mcpServers": {
-    "brave-search": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-      "env": {
-        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
-      }
-    }
-  },
-
-  "plugins": [
-    "./hooks/my-plugin.js"
-  ]
+  "baseURL": "https://api.deepseek.com"
 }

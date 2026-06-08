@@ -17,7 +17,13 @@ const BASE_SYSTEM_PROMPT = `\
 You are Axon, a concise AI coding assistant running in the terminal.
 You have tools to read/write files and run bash commands.
 Always read a file before editing it.
-Keep responses short and focused — no unnecessary prose.`;
+Keep responses short and focused — no unnecessary prose.
+
+## Task tracking
+For any task with 3 or more steps, use the \`todo\` tool:
+- At the start: list all steps as pending
+- Before each step: mark it in_progress (only one at a time)
+- After each step: mark it completed`;
 
 // 工具调用的内部类型：id 是 OpenAI 分配的唯一标识，arguments 是 JSON 字符串
 type ToolCall = { id: string; name: string; arguments: string };
@@ -85,17 +91,25 @@ export class Session {
   /**
    * 核心 Agent 循环：不断调用 LLM → 执行工具 → 再调用 LLM，
    * 直到 finishReason 不是 "tool_calls" 为止。
+   * 
+   * 个人理解：
+   * 核心就行调用llm,追加消息上下文，看llm是否要调用工具，不调用就退出，要调用的话就执行工具，继续把工具执行结果追加到消息上下文
+   * 把上下文继续传给llm，看看下一轮要不要调用工具，如此循环，直到llm不再调用工具为止。 
+   * 
    */
   private async runLoop(): Promise<void> {
     let reactiveRetries = 0; // 防止 reactiveCompact 死循环，最多触发 1 次
     while (true) {
+      
+     // ── 1. 多层压缩流水线 ────────────────────────────────────────────────────────────────
+  
       // 每次 API 调用前先跑压缩流水线，控制 context 体积
       await this.hooks.emit("onBeforeCompact", { messages: this.messages });
 
       // L3 → L1 → L2 顺序很重要：L3 持久化大结果，L1 裁剪条数，L2 替换旧内容
-      this.messages = toolResultBudget(this.messages);
-      this.messages = snipCompact(this.messages);
-      this.messages = microCompact(this.messages);
+      this.messages = toolResultBudget(this.messages); // L3: 压缩工具返回的大结果
+      this.messages = snipCompact(this.messages);  // L1: 裁剪消息条数
+      this.messages = microCompact(this.messages);    // L2: 替换旧内容为摘要 
 
       // 体积仍超限时触发 L4 LLM 摘要
       if (estimateSize(this.messages) > CONTEXT_LIMIT) {
@@ -103,26 +117,10 @@ export class Session {
         this.messages = await compactHistory(this.messages, this.client, this.model);
       }
 
-      // 连续 3 轮未调用 todo 时，向最后一条 user/tool 消息注入 reminder
-      if (this.roundsSinceTodo >= 3) {
-        const last = this.messages[this.messages.length - 1];
-        if (last) {
-          if (typeof last.content === "string") {
-            (last as any).content = [
-              { type: "text", text: "<reminder>Update your todos to reflect current progress.</reminder>" },
-              { type: "text", text: last.content },
-            ];
-          } else if (Array.isArray(last.content)) {
-            (last.content as any[]).unshift({
-              type: "text",
-              text: "<reminder>Update your todos to reflect current progress.</reminder>",
-            });
-          }
-        }
-      }
-
       let result: Awaited<ReturnType<typeof this.callApi>>;
       try {
+
+    // ── 2.调用LLM ────────────────────────────────────────────────────────────────
         result = await this.callApi();
         reactiveRetries = 0; // 调用成功，重置计数
       } catch (err: any) {
@@ -131,7 +129,9 @@ export class Session {
           err?.message?.toLowerCase().includes("prompt_too_long") ||
           err?.message?.toLowerCase().includes("too many tokens");
 
+        // 检查是否是 token 超限错误(最多重试 1 次，避免无限循环)
         if (isOverLimit && reactiveRetries < 1) {
+          // 紧急压缩后重试
           this.messages = await reactiveCompact(this.messages, this.client, this.model);
           reactiveRetries++;
           continue;
@@ -142,6 +142,8 @@ export class Session {
       const { content, toolCalls, finishReason } = result;
 
       await this.hooks.emit("onAfterLLMResponse", { content, toolCalls });
+   
+      // ── 3.处理LLM响应（追加对话历史） ────────────────────────────────────────────────────────────────
 
       // 把 LLM 的回复（含工具调用请求）追加到对话历史
       if (toolCalls.length > 0) {
@@ -158,9 +160,13 @@ export class Session {
         this.messages.push({ role: "assistant", content });
       }
 
+      // ── 3.循环终止条件────────────────────────────────────────────────────────────────
+
       // LLM 不再要求调用工具，循环结束
       if (finishReason !== "tool_calls") break;
 
+      // ── 4.Plan 模式：用户确认────────────────────────────────────────────────────────────────
+     
       // plan 模式：展示本轮所有工具调用计划，等用户确认后再执行
       if (getMode() === "plan") {
         console.log(chalk.yellow("\n📋 执行计划："));
@@ -180,32 +186,45 @@ export class Session {
         }
       }
 
-      // 依次执行每个工具调用，将结果追加到对话历史
+      // 依次执行每个工具调用，收集结果
+      let usedTodo = false;
+      const toolResults: OpenAI.Chat.ChatCompletionToolMessageParam[] = [];
+
       for (const tc of toolCalls) {
         console.log(chalk.dim(`  input: ${tc.arguments}`));
-        let input: Record<string, string>;
+        let input: Record<string, unknown>;
         try {
           input = JSON.parse(tc.arguments);
         } catch {
           input = {};
         }
 
+        // 触发钩子（用于日志、监控等）
         await this.hooks.emit("onBeforeToolCall", { name: tc.name, input });
+       
+        // 执行实际的工具函数
         const output = await dispatch(tc.name, input);
         await this.hooks.emit("onAfterToolCall", { name: tc.name, input, output });
 
-        // 调用了 todo 工具则重置计数，否则累加
-        if (tc.name === "todo") {
-          this.roundsSinceTodo = 0;
-        } else {
-          this.roundsSinceTodo++;
-        }
+        if (tc.name === "todo") usedTodo = true;
 
         // 只打印前 500 字符预览，避免刷屏
         const preview = output.length > 500 ? output.slice(0, 500) + "…" : output;
         console.log(chalk.dim(preview));
 
-        this.messages.push({ role: "tool", tool_call_id: tc.id, content: output });
+        toolResults.push({ role: "tool", tool_call_id: tc.id, content: output });
+      }
+
+      // 更新 nag 计数
+      this.roundsSinceTodo = usedTodo ? 0 : this.roundsSinceTodo + 1;
+
+      // tool results 逐条追加（OpenAI 要求 role:tool 消息）
+      for (const r of toolResults) {
+        this.messages.push(r);
+      }
+      // 连续 3 轮未调用 todo 时，额外追加一条 reminder
+      if (this.roundsSinceTodo >= 3) {
+        this.messages.push({ role: "user", content: "<reminder>Update your todos.</reminder>" });
       }
     }
   }
