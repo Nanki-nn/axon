@@ -9,6 +9,14 @@ import { SkillLoader } from "../skills";
 // 当前会话的技能加载器，由 cli.ts 在启动时注入
 let skillLoader: SkillLoader | null = null;
 
+// task 工具的执行函数，由 Session 在启动时注入（需要 client/model 才能运行子 agent）
+let taskRunner: ((prompt: string, description: string) => Promise<string>) | null = null;
+
+/** 注入 task 工具的执行函数 */
+export function setTaskRunner(fn: (prompt: string, description: string) => Promise<string>): void {
+  taskRunner = fn;
+}
+
 // MCP 工具注册表：工具全名（serverName__toolName）→ 调用函数
 const mcpDispatchers = new Map<string, (input: Record<string, string>) => Promise<string>>();
 // MCP 工具的 OpenAI function definition 列表（动态追加到 DEFINITIONS）
@@ -36,6 +44,25 @@ export function registerMcpTool(
 }
 
 // ── 技能工具定义（供 LLM 发现和调用技能） ─────────────────────────────────────
+
+const TASK_DEFINITION = {
+  type: "function" as const,
+  function: {
+    name: "task",
+    description:
+      "Spawn a subagent with a fresh context to handle exploration or a self-contained subtask. " +
+      "The subagent shares the filesystem but not conversation history. " +
+      "Only its final summary is returned — use this to keep parent context clean.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        prompt:      { type: "string", description: "Full instructions for the subagent" },
+        description: { type: "string", description: "Short label shown in logs, e.g. 'explore auth module'" },
+      },
+      required: ["prompt"],
+    },
+  },
+};
 
 const SKILL_LIST_DEFINITION = {
   type: "function" as const,
@@ -78,6 +105,7 @@ export function getDEFINITIONS(): object[] {
     LIST_DEFINITION,
     SEARCH_DEFINITION,
     TODO_DEFINITION,
+    TASK_DEFINITION,
     SKILL_LIST_DEFINITION,
     SKILL_READ_DEFINITION,
     ...mcpDefinitions,
@@ -111,6 +139,9 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   list_files:   (i) => listFiles(i.pattern),
   search_files: (i) => searchFiles(i.pattern, i.path ?? "."),
   todo:         (i) => { try { return TODO.update(i.items ?? []); } catch (e: any) { return `Error: ${e.message}`; } },
+  task:         (i) => taskRunner
+    ? taskRunner(i.prompt ?? "", i.description ?? "subtask")
+    : "Error: task runner not initialized",
   skill_list:   (_) => skillLoader?.listSkills() ?? "Error: skill system not initialized",
   skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
 };

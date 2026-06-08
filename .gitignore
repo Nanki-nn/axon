@@ -7,3 +7,4 @@ dist/
 .transcripts/
 skills-lock.json
 axon.config.json
+mypackage/

@@ -224,6 +224,7 @@ program
       hooks,
       undefined,
       client,
+      loader,
     );
 
     if (prompt) {

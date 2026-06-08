@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import chalk from "chalk";
-import { DEFINITIONS, dispatch } from "./tools";
+import { DEFINITIONS, dispatch, setTaskRunner, getDEFINITIONS } from "./tools";
 import { confirm } from "./tools/bash";
 import { getMode } from "./mode";
 import {
@@ -9,6 +9,8 @@ import {
   estimateSize, CONTEXT_LIMIT,
 } from "./compaction";
 import { HookSystem } from "./hooks";
+import { SkillLoader } from "./skills";
+import { runSubagent } from "./subagent";
 
 export const DEFAULT_MODEL = "deepseek-chat";
 
@@ -45,13 +47,13 @@ export class Session {
   constructor(
     apiKey: string,
     model: string = DEFAULT_MODEL,
-    agentsContext: string = "",   // 来自 AGENTS.md 的项目上下文
-    memoryContext: string = "",    // 来自 memory.md 的长期记忆
+    agentsContext: string = "",
+    memoryContext: string = "",
     hooks: HookSystem = new HookSystem(),
     baseURL?: string,
-    client?: OpenAI,               // 可直接注入客户端（如 Anthropic 适配器）
+    client?: OpenAI,
+    skillLoader?: SkillLoader,
   ) {
-    // 优先使用传入的 client，回退到用 apiKey 创建默认客户端
     this.client = client ?? new OpenAI({
       apiKey,
       baseURL: baseURL ?? "https://api.deepseek.com",
@@ -59,7 +61,13 @@ export class Session {
     this.model = model;
     this.hooks = hooks;
 
-    // 动态拼接系统提示：基础 + 长期记忆 + 项目上下文 + 技能系统说明
+    // 注册 task 工具的执行函数（闭包捕获 client/model/definitions）
+    setTaskRunner((prompt, description) => {
+      console.log(chalk.dim(`  [task] ${description}: ${prompt.slice(0, 80)}`));
+      return runSubagent(prompt, this.client, this.model, getDEFINITIONS());
+    });
+
+    // 动态拼接系统提示：基础 + 长期记忆 + 项目上下文 + 技能列表
     let prompt = BASE_SYSTEM_PROMPT;
     if (memoryContext) {
       prompt += `\n\n## 长期记忆\n${memoryContext}`;
@@ -67,7 +75,11 @@ export class Session {
     if (agentsContext) {
       prompt += `\n\n## 项目上下文（来自 AGENTS.md）\n${agentsContext}`;
     }
-    prompt += `\n\n## Skill system\nUse \`skill_list\` to browse available skills, then \`skill_read\` to load one before tackling a matching task.`;
+    if (skillLoader && skillLoader.size > 0) {
+      prompt += `\n\n## Skills\nUse \`skill_read\` to load a skill before tackling a matching task.\n\n${skillLoader.listSkills()}`;
+    } else {
+      prompt += `\n\n## Skills\nNo skills available.`;
+    }
     this.systemPrompt = prompt;
   }
 
@@ -97,10 +109,30 @@ export class Session {
    * 把上下文继续传给llm，看看下一轮要不要调用工具，如此循环，直到llm不再调用工具为止。 
    * 
    */
+  private debugMessages(tag: string): void {
+    console.log(chalk.magenta(`\n[debug] ${tag} — messages 共 ${this.messages.length} 条`));
+    for (const msg of this.messages) {
+      const role = msg.role;
+      let preview = "";
+      if (role === "assistant" && "tool_calls" in msg && msg.tool_calls) {
+        preview = `tool_calls: ${msg.tool_calls.map((tc: any) => {
+          const args = tc.function?.arguments ?? "";
+          return `${tc.function?.name ?? "(unnamed)"}(${args.slice(0, 80)})`;
+        }).join(", ")}`;
+      } else if ("content" in msg && typeof msg.content === "string") {
+        preview = msg.content.slice(0, 120);
+      } else if ("content" in msg && Array.isArray(msg.content)) {
+        preview = "[multi-part]";
+      }
+      console.log(chalk.magenta(`  [${role}] ${preview}`));
+    }
+  }
+
   private async runLoop(): Promise<void> {
     let reactiveRetries = 0; // 防止 reactiveCompact 死循环，最多触发 1 次
     while (true) {
-      
+      this.debugMessages("runLoop 顶部");
+
      // ── 1. 多层压缩流水线 ────────────────────────────────────────────────────────────────
   
       // 每次 API 调用前先跑压缩流水线，控制 context 体积
@@ -185,6 +217,8 @@ export class Session {
           break;
         }
       }
+
+       // ── 4. 执行工具 ────────────────────────────────────────────────────────────────
 
       // 依次执行每个工具调用，收集结果
       let usedTodo = false;

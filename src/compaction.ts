@@ -52,12 +52,23 @@ export function snipCompact(messages: Message[]): Message[] {
 
   const keepHead = 3;
   const keepTail = MAX_MESSAGES - keepHead;
-  const snipped = messages.length - keepHead - keepTail;
+
+  let tailStart = messages.length - keepTail;
+
+  // 确保 tail 的起点不落在 tool 消息中间——往前找到对应的 assistant tool_calls
+  while (tailStart < messages.length && messages[tailStart].role === "tool") {
+    tailStart--;
+  }
+  // tailStart 现在指向 assistant tool_calls 或更早，确保配对完整
+  // 但不能回退到 head 保留区里
+  tailStart = Math.max(keepHead, tailStart);
+
+  const snipped = tailStart - keepHead;
 
   return [
     ...messages.slice(0, keepHead),
-    { role: "user", content: `[已压缩 ${snipped} 条中间消息]` },
-    ...messages.slice(-keepTail),
+    ...(snipped > 0 ? [{ role: "user" as const, content: `[已压缩 ${snipped} 条中间消息]` }] : []),
+    ...messages.slice(tailStart),
   ];
 }
 
