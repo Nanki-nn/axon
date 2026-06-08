@@ -33,6 +33,8 @@ export class Session {
   private messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
   private systemPrompt: string;
   private hooks: HookSystem;
+  /** 连续未调用 todo 工具的轮数，达到阈值时注入 reminder */
+  private roundsSinceTodo = 0;
 
   constructor(
     apiKey: string,
@@ -99,6 +101,24 @@ export class Session {
       if (estimateSize(this.messages) > CONTEXT_LIMIT) {
         console.log(chalk.dim("[auto compact 触发]"));
         this.messages = await compactHistory(this.messages, this.client, this.model);
+      }
+
+      // 连续 3 轮未调用 todo 时，向最后一条 user/tool 消息注入 reminder
+      if (this.roundsSinceTodo >= 3) {
+        const last = this.messages[this.messages.length - 1];
+        if (last) {
+          if (typeof last.content === "string") {
+            (last as any).content = [
+              { type: "text", text: "<reminder>Update your todos to reflect current progress.</reminder>" },
+              { type: "text", text: last.content },
+            ];
+          } else if (Array.isArray(last.content)) {
+            (last.content as any[]).unshift({
+              type: "text",
+              text: "<reminder>Update your todos to reflect current progress.</reminder>",
+            });
+          }
+        }
       }
 
       let result: Awaited<ReturnType<typeof this.callApi>>;
@@ -173,6 +193,13 @@ export class Session {
         await this.hooks.emit("onBeforeToolCall", { name: tc.name, input });
         const output = await dispatch(tc.name, input);
         await this.hooks.emit("onAfterToolCall", { name: tc.name, input, output });
+
+        // 调用了 todo 工具则重置计数，否则累加
+        if (tc.name === "todo") {
+          this.roundsSinceTodo = 0;
+        } else {
+          this.roundsSinceTodo++;
+        }
 
         // 只打印前 500 字符预览，避免刷屏
         const preview = output.length > 500 ? output.slice(0, 500) + "…" : output;

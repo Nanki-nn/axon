@@ -3,6 +3,7 @@ import {
   READ_DEFINITION, WRITE_DEFINITION, EDIT_DEFINITION, LIST_DEFINITION, SEARCH_DEFINITION,
   readFile, writeFile, editFile, listFiles, searchFiles,
 } from "./files";
+import { TODO_DEFINITION, TODO } from "./todo";
 import { SkillLoader } from "../skills";
 
 // 当前会话的技能加载器，由 cli.ts 在启动时注入
@@ -76,6 +77,7 @@ export function getDEFINITIONS(): object[] {
     EDIT_DEFINITION,
     LIST_DEFINITION,
     SEARCH_DEFINITION,
+    TODO_DEFINITION,
     SKILL_LIST_DEFINITION,
     SKILL_READ_DEFINITION,
     ...mcpDefinitions,
@@ -97,28 +99,30 @@ export const DEFINITIONS = new Proxy([] as object[], {
   },
 });
 
-type ToolInput = Record<string, string>;
+type ToolInput = Record<string, any>;
+type ToolHandler = (input: ToolInput) => Promise<string> | string;
+
+// 内置工具 dispatch map：工具名 → 处理函数
+const TOOL_HANDLERS: Record<string, ToolHandler> = {
+  bash:         (i) => bashExecute(i.command),
+  read_file:    (i) => readFile(i.path),
+  write_file:   (i) => writeFile(i.path, i.content),
+  edit_file:    (i) => editFile(i.path, i.old_string, i.new_string),
+  list_files:   (i) => listFiles(i.pattern),
+  search_files: (i) => searchFiles(i.pattern, i.path ?? "."),
+  todo:         (i) => { try { return TODO.update(i.items ?? []); } catch (e: any) { return `Error: ${e.message}`; } },
+  skill_list:   (_) => skillLoader?.listSkills() ?? "Error: skill system not initialized",
+  skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
+};
 
 /**
  * 工具调用分发器：根据工具名找到对应的执行函数并调用。
  * MCP 工具优先（动态注册），其次是内置工具。
  */
 export async function dispatch(name: string, input: ToolInput): Promise<string> {
-  // 先查 MCP 注册表（动态注册的工具）
   if (mcpDispatchers.has(name)) {
     return mcpDispatchers.get(name)!(input);
   }
-
-  // 内置工具按名称分发
-  switch (name) {
-    case "bash":         return bashExecute(input.command);
-    case "read_file":    return readFile(input.path);
-    case "write_file":   return writeFile(input.path, input.content);
-    case "edit_file":    return editFile(input.path, input.old_string, input.new_string);
-    case "list_files":   return listFiles(input.pattern);
-    case "search_files": return searchFiles(input.pattern, input.path ?? ".");
-    case "skill_list":   return skillLoader?.listSkills() ?? "Error: skill system not initialized";
-    case "skill_read":   return skillLoader?.getContent(input.name) ?? "Error: skill system not initialized";
-    default:             return `Error: unknown tool '${name}'`;
-  }
+  const handler = TOOL_HANDLERS[name];
+  return handler ? handler(input) : `Error: unknown tool '${name}'`;
 }

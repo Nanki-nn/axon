@@ -1,7 +1,17 @@
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
-import { dirname } from "path";
+import { dirname, resolve } from "path";
 import { spawnSync } from "child_process";
 import { globSync } from "glob";
+
+const WORKDIR = process.cwd();
+
+function safePath(p: string): string {
+  const abs = resolve(WORKDIR, p);
+  if (!abs.startsWith(WORKDIR + "/") && abs !== WORKDIR) {
+    throw new Error(`Path escapes workspace: ${p}`);
+  }
+  return abs;
+}
 
 // ── 工具定义（OpenAI function calling 格式，传给 LLM）─────────────────────────
 
@@ -94,10 +104,14 @@ export const SEARCH_DEFINITION = {
 
 // ── 工具实现 ──────────────────────────────────────────────────────────────────
 
+const READ_LIMIT_BYTES = 50_000;
+
 /** 读取文件内容，出错时返回错误信息字符串而非抛出异常 */
 export function readFile(path: string): string {
   try {
-    return readFileSync(path, "utf-8");
+    const abs = safePath(path);
+    const text = readFileSync(abs, "utf-8");
+    return text.length > READ_LIMIT_BYTES ? text.slice(0, READ_LIMIT_BYTES) + "\n[truncated]" : text;
   } catch (err: any) {
     return `Error: ${err.message}`;
   }
@@ -106,9 +120,10 @@ export function readFile(path: string): string {
 /** 写入文件，自动创建父目录，返回写入字节数确认 */
 export function writeFile(path: string, content: string): string {
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, content, "utf-8");
-    return `Written ${content.length} bytes to ${path}`;
+    const abs = safePath(path);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, content, "utf-8");
+    return `Written ${content.length} bytes to ${abs}`;
   } catch (err: any) {
     return `Error: ${err.message}`;
   }
@@ -120,7 +135,8 @@ export function writeFile(path: string, content: string): string {
  */
 export function editFile(path: string, oldString: string, newString: string): string {
   try {
-    const original = readFileSync(path, "utf-8");
+    const abs = safePath(path);
+    const original = readFileSync(abs, "utf-8");
     if (!original.includes(oldString)) {
       return `Error: old_string not found in ${path}`;
     }
@@ -134,16 +150,16 @@ export function editFile(path: string, oldString: string, newString: string): st
     if (count > 1) {
       return `Error: old_string appears ${count} times in ${path}. Provide more surrounding context to make the match unique.`;
     }
-    writeFileSync(path, original.replace(oldString, newString), "utf-8");
-    return `Edited ${path}`;
+    writeFileSync(abs, original.replace(oldString, newString), "utf-8");
+    return `Edited ${abs}`;
   } catch (err: any) {
     return `Error: ${err.message}`;
   }
 }
 
-/** 使用 glob 模式列举文件，结果按字母排序 */
+/** 使用 glob 模式列举文件，结果按字母排序，cwd 限定在工作区内 */
 export function listFiles(pattern: string): string {
-  const matches = globSync(pattern);
+  const matches = globSync(pattern, { cwd: WORKDIR });
   return matches.length ? matches.sort().join("\n") : `No files matched: ${pattern}`;
 }
 
@@ -152,7 +168,13 @@ export function listFiles(pattern: string): string {
  * 使用 spawnSync 而不是 execSync，避免用户提供的 pattern 造成 shell 注入。
  */
 export function searchFiles(pattern: string, searchPath: string = "."): string {
-  const result = spawnSync("grep", ["-rn", pattern, searchPath], {
+  let absSearchPath: string;
+  try {
+    absSearchPath = safePath(searchPath);
+  } catch (err: any) {
+    return `Error: ${err.message}`;
+  }
+  const result = spawnSync("grep", ["-rn", pattern, absSearchPath], {
     encoding: "utf-8",
     timeout: 15_000,
   });
