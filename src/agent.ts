@@ -22,11 +22,15 @@ You have tools to read/write files and run bash commands.
 Always read a file before editing it.
 Keep responses short and focused — no unnecessary prose.
 
-## Task tracking
-For any task with 3 or more steps, use the \`todo\` tool:
+## Task tracking (persistent)
+Use \`task_create\` to create tasks, \`task_update\` to update status/dependencies,
+\`task_list\` to view all, and \`task_delete\` to remove tasks.
+Tasks are persisted to disk and survive conversation compression.
+For any task with 3 or more steps:
 - At the start: list all steps as pending
 - Before each step: mark it in_progress (only one at a time)
-- After each step: mark it completed`;
+- After each step: mark it completed
+Use \`blockedBy\` to set up dependencies between tasks (DAG).`;
 
 // 工具调用的内部类型：id 是 OpenAI 分配的唯一标识，arguments 是 JSON 字符串
 type ToolCall = { id: string; name: string; arguments: string };
@@ -232,7 +236,8 @@ export class Session {
         const output = await dispatch(tc.name, input);
         await this.hooks.emit("onAfterToolCall", { name: tc.name, input, output });
 
-        if (tc.name === "todo") usedTodo = true;
+        const taskToolNames = ["todo", "task_create", "task_update", "task_list", "task_delete"];
+        if (taskToolNames.includes(tc.name)) usedTodo = true;
 
         const preview = output.length > 500 ? output.slice(0, 500) + "…" : output;
         console.log(chalk.dim(preview));

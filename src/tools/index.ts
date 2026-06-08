@@ -3,7 +3,7 @@ import {
   READ_DEFINITION, WRITE_DEFINITION, EDIT_DEFINITION, LIST_DEFINITION, SEARCH_DEFINITION,
   readFile, writeFile, editFile, listFiles, searchFiles,
 } from "./files";
-import { TODO_DEFINITION, TODO } from "./todo";
+import { TODO_DEFINITION, TODO, taskTools } from "./todo";
 import { DEFINITION as COMPACT_DEF, execute as compactExecute } from "./compact";
 import { SkillLoader } from "../skills";
 
@@ -106,6 +106,14 @@ export function getDEFINITIONS(): object[] {
     LIST_DEFINITION,
     SEARCH_DEFINITION,
     TODO_DEFINITION,
+    ...taskTools.map((t) => ({
+      type: "function" as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      },
+    })),
     COMPACT_DEF,
     TASK_DEFINITION,
     SKILL_LIST_DEFINITION,
@@ -141,6 +149,10 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   list_files:   (i) => listFiles(i.pattern),
   search_files: (i) => searchFiles(i.pattern, i.path ?? "."),
   todo:         (i) => { try { return TODO.update(i.items ?? []); } catch (e: any) { return `Error: ${e.message}`; } },
+  task_create:  (i) => taskTools[0].handler(i),
+  task_update:  (i) => taskTools[1].handler(i),
+  task_list:    (_) => taskTools[2].handler({}),
+  task_delete:  (i) => taskTools[3].handler(i),
   compact:      (i) => compactExecute(),
   task:         (i) => taskRunner
     ? taskRunner(i.prompt ?? "", i.description ?? "subtask")

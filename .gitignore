@@ -8,3 +8,4 @@ dist/
 skills-lock.json
 axon.config.json
 mypackage/
+.tasks/
