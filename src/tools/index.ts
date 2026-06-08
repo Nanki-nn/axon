@@ -6,6 +6,12 @@ import {
 import { TODO_DEFINITION, TODO, taskTools } from "./todo";
 import { DEFINITION as COMPACT_DEF, execute as compactExecute } from "./compact";
 import { SkillLoader } from "../skills";
+import {
+  BACKGROUND_RUN_DEFINITION,
+  CHECK_BACKGROUND_DEFINITION,
+  backgroundRun,
+  checkBackground,
+} from "./background";
 
 // 当前会话的技能加载器，由 cli.ts 在启动时注入
 let skillLoader: SkillLoader | null = null;
@@ -106,6 +112,8 @@ export function getDEFINITIONS(): object[] {
     LIST_DEFINITION,
     SEARCH_DEFINITION,
     TODO_DEFINITION,
+    BACKGROUND_RUN_DEFINITION,
+    CHECK_BACKGROUND_DEFINITION,
     ...taskTools.map((t) => ({
       type: "function" as const,
       function: {
@@ -159,6 +167,8 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
     : "Error: task runner not initialized",
   skill_list:   (_) => skillLoader?.listSkills() ?? "Error: skill system not initialized",
   skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
+  background_run:  (i) => { const taskId = backgroundRun(i.command); return JSON.stringify({ taskId, status: "running", note: "使用 check_background 查询结果" }); },
+  check_background: (i) => checkBackground(i.taskId),
 };
 
 /**

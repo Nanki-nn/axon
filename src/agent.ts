@@ -9,6 +9,7 @@ import {
   microCompact, compactHistory,
   estimateSize, CONTEXT_LIMIT,
 } from "./compaction";
+import { getCompletedTasksSummaries } from "./tools/background";
 import { HookSystem } from "./hooks";
 import { SkillLoader } from "./skills";
 import { runSubagent } from "./subagent";
@@ -143,6 +144,14 @@ export class Session {
       if (estimateSize(this.messages) > CONTEXT_LIMIT) {
         console.log(chalk.dim("[auto compact 触发]"));
         this.messages = await compactHistory(this.messages, this.client, this.model);
+      }
+
+      // ── 1c. 检查后台任务完成状态，注入到消息中 ──
+      const completedSummaries = getCompletedTasksSummaries();
+      if (completedSummaries.length > 0) {
+        const bgContent = completedSummaries.join("\n\n");
+        console.log(chalk.dim(`[后台任务完成: ${completedSummaries.length} 个]`));
+        this.messages.push({ role: "user", content: `<background-results>\n${bgContent}\n</background-results>` });
       }
 
       let result: Awaited<ReturnType<typeof this.callApi>>;
