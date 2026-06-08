@@ -2,6 +2,7 @@
 import * as readline from "readline";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import { config } from "dotenv";
 import { Command } from "commander";
 import chalk from "chalk";
@@ -32,14 +33,23 @@ interface AxonConfig {
   plugins?: string[];
 }
 
-function loadAxonConfig(): AxonConfig {
-  const configPath = path.join(process.cwd(), "axon.config.json");
-  if (!fs.existsSync(configPath)) return {};
+function readConfig(filePath: string): AxonConfig {
   try {
-    return JSON.parse(fs.readFileSync(configPath, "utf-8")) as AxonConfig;
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as AxonConfig;
   } catch {
     return {};
   }
+}
+
+function loadAxonConfig(): AxonConfig {
+  const globalConfig = readConfig(path.join(os.homedir(), ".axon", "config.json"));
+  const localConfig = readConfig(path.join(process.cwd(), "axon.config.json"));
+  return {
+    ...globalConfig,
+    ...localConfig,
+    mcpServers: { ...globalConfig.mcpServers, ...localConfig.mcpServers },
+    plugins: [...(globalConfig.plugins ?? []), ...(localConfig.plugins ?? [])],
+  };
 }
 
 // ── API key resolution ────────────────────────────────────────────────────────

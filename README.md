@@ -21,10 +21,26 @@
 ## 安装
 
 ```bash
+npm install -g axon-cli
+```
+
+或从源码安装：
+
+```bash
 git clone https://github.com/yourusername/axon
 cd axon
 npm install && npm run build && npm install -g .
-cp .env.example .env   # 填入 DEEPSEEK_API_KEY
+```
+
+配置 API key（任选其一）：
+
+```bash
+# 方式一：全局配置文件（推荐）
+mkdir -p ~/.axon
+echo '{ "provider": "deepseek", "apiKey": "your-key-here" }' > ~/.axon/config.json
+
+# 方式二：环境变量
+export DEEPSEEK_API_KEY=your-key-here
 ```
 
 ---
@@ -60,13 +76,23 @@ npm run dev -- "prompt"       # 开发时免 build
 
 ## 配置文件
 
-项目根目录的 `axon.config.json`（字段按需填）：
+配置分两层，本地覆盖全局，`mcpServers` 和 `plugins` 合并：
+
+**全局配置** `~/.axon/config.json`（对所有项目生效）：
 
 ```json
 {
   "provider": "deepseek",
   "model": "deepseek-chat",
-  "apiKey": "${DEEPSEEK_API_KEY}",
+  "apiKey": "${DEEPSEEK_API_KEY}"
+}
+```
+
+**项目配置** `axon.config.json`（放在项目根目录，覆盖全局）：
+
+```json
+{
+  "model": "deepseek-reasoner",
   "mcpServers": {
     "brave-search": {
       "command": "npx",
@@ -77,6 +103,8 @@ npm run dev -- "prompt"       # 开发时免 build
   "plugins": ["./hooks/audit.js"]
 }
 ```
+
+`apiKey` 支持 `${ENV_VAR}` 语法引用环境变量，避免明文写入配置文件。
 
 ---
 

@@ -1,17 +1,42 @@
 {
   "name": "axon-cli",
   "version": "0.1.0",
-  "description": "A minimal AI coding assistant powered by DeepSeek",
+  "description": "A minimal AI coding assistant CLI powered by DeepSeek, OpenAI, Anthropic and more",
   "main": "dist/cli.js",
   "bin": {
     "axon": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "!dist/__tests__/"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "agent",
+    "coding-assistant",
+    "deepseek",
+    "openai",
+    "anthropic",
+    "mcp",
+    "llm"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/axon"
+  },
+  "homepage": "https://github.com/yourusername/axon#readme",
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "chalk": "^4.1.2",
