@@ -1,11 +1,12 @@
 import OpenAI from "openai";
 import chalk from "chalk";
+import * as fs from "fs";
+import * as path from "path";
 import { DEFINITIONS, dispatch, setTaskRunner, getDEFINITIONS } from "./tools";
 import { confirm } from "./tools/bash";
 import { getMode } from "./mode";
 import {
-  snipCompact, microCompact, toolResultBudget,
-  compactHistory, reactiveCompact,
+  microCompact, compactHistory,
   estimateSize, CONTEXT_LIMIT,
 } from "./compaction";
 import { HookSystem } from "./hooks";
@@ -103,14 +104,11 @@ export class Session {
   /**
    * 核心 Agent 循环：不断调用 LLM → 执行工具 → 再调用 LLM，
    * 直到 finishReason 不是 "tool_calls" 为止。
-   * 
-   * 个人理解：
-   * 核心就行调用llm,追加消息上下文，看llm是否要调用工具，不调用就退出，要调用的话就执行工具，继续把工具执行结果追加到消息上下文
-   * 把上下文继续传给llm，看看下一轮要不要调用工具，如此循环，直到llm不再调用工具为止。 
-   * 
    */
   private debugMessages(tag: string): void {
-    console.log(chalk.magenta(`\n[debug] ${tag} — messages 共 ${this.messages.length} 条`));
+    const logPath = path.join(process.cwd(), "debug-messages.log");
+    const lines: string[] = [];
+    lines.push(`\n[${new Date().toISOString()}] ${tag} — messages 共 ${this.messages.length} 条`);
     for (const msg of this.messages) {
       const role = msg.role;
       let preview = "";
@@ -124,26 +122,20 @@ export class Session {
       } else if ("content" in msg && Array.isArray(msg.content)) {
         preview = "[multi-part]";
       }
-      console.log(chalk.magenta(`  [${role}] ${preview}`));
+      lines.push(`  [${role}] ${preview}`);
     }
+    fs.appendFileSync(logPath, lines.join("\n") + "\n");
   }
 
   private async runLoop(): Promise<void> {
-    let reactiveRetries = 0; // 防止 reactiveCompact 死循环，最多触发 1 次
     while (true) {
       this.debugMessages("runLoop 顶部");
 
-     // ── 1. 多层压缩流水线 ────────────────────────────────────────────────────────────────
-  
-      // 每次 API 调用前先跑压缩流水线，控制 context 体积
+      // ── 1a. L1: micro_compact（每轮静默，替换早期工具结果为占位符） ──
       await this.hooks.emit("onBeforeCompact", { messages: this.messages });
+      this.messages = microCompact(this.messages);
 
-      // L3 → L1 → L2 顺序很重要：L3 持久化大结果，L1 裁剪条数，L2 替换旧内容
-      this.messages = toolResultBudget(this.messages); // L3: 压缩工具返回的大结果
-      this.messages = snipCompact(this.messages);  // L1: 裁剪消息条数
-      this.messages = microCompact(this.messages);    // L2: 替换旧内容为摘要 
-
-      // 体积仍超限时触发 L4 LLM 摘要
+      // ── 1b. L2: auto_compact（体积超限时 LLM 摘要压缩） ──
       if (estimateSize(this.messages) > CONTEXT_LIMIT) {
         console.log(chalk.dim("[auto compact 触发]"));
         this.messages = await compactHistory(this.messages, this.client, this.model);
@@ -151,33 +143,26 @@ export class Session {
 
       let result: Awaited<ReturnType<typeof this.callApi>>;
       try {
-
-    // ── 2.调用LLM ────────────────────────────────────────────────────────────────
+        // ── 2. 调用 LLM ──
         result = await this.callApi();
-        reactiveRetries = 0; // 调用成功，重置计数
       } catch (err: any) {
-        // API 返回 prompt_too_long 时，尝试紧急压缩后重试一次
+        // API 返回 prompt_too_long 时，紧急压缩后重试一次
         const isOverLimit =
           err?.message?.toLowerCase().includes("prompt_too_long") ||
           err?.message?.toLowerCase().includes("too many tokens");
 
-        // 检查是否是 token 超限错误(最多重试 1 次，避免无限循环)
-        if (isOverLimit && reactiveRetries < 1) {
-          // 紧急压缩后重试
-          this.messages = await reactiveCompact(this.messages, this.client, this.model);
-          reactiveRetries++;
+        if (isOverLimit) {
+          console.log(chalk.dim("[error: token 超限，紧急压缩]"));
+          this.messages = await compactHistory(this.messages, this.client, this.model);
           continue;
         }
         throw err;
       }
 
       const { content, toolCalls, finishReason } = result;
-
       await this.hooks.emit("onAfterLLMResponse", { content, toolCalls });
-   
-      // ── 3.处理LLM响应（追加对话历史） ────────────────────────────────────────────────────────────────
 
-      // 把 LLM 的回复（含工具调用请求）追加到对话历史
+      // ── 3. 处理 LLM 响应（追加对话历史） ──
       if (toolCalls.length > 0) {
         this.messages.push({
           role: "assistant",
@@ -192,14 +177,10 @@ export class Session {
         this.messages.push({ role: "assistant", content });
       }
 
-      // ── 3.循环终止条件────────────────────────────────────────────────────────────────
-
       // LLM 不再要求调用工具，循环结束
       if (finishReason !== "tool_calls") break;
 
-      // ── 4.Plan 模式：用户确认────────────────────────────────────────────────────────────────
-     
-      // plan 模式：展示本轮所有工具调用计划，等用户确认后再执行
+      // ── Plan 模式：用户确认 ──
       if (getMode() === "plan") {
         console.log(chalk.yellow("\n📋 执行计划："));
         toolCalls.forEach((tc, i) => {
@@ -210,7 +191,6 @@ export class Session {
 
         const ok = await confirm(chalk.yellow("\n确认执行以上操作？"));
         if (!ok) {
-          // 用户拒绝，填入取消消息后退出循环
           for (const tc of toolCalls) {
             this.messages.push({ role: "tool", tool_call_id: tc.id, content: "用户取消了执行。" });
           }
@@ -218,7 +198,21 @@ export class Session {
         }
       }
 
-       // ── 4. 执行工具 ────────────────────────────────────────────────────────────────
+      // ── 4. 执行工具 ──
+
+      // L3: compact 工具（LLM 手动触发 auto_compact）
+      const compactCall = toolCalls.find(tc => tc.name === "compact");
+      if (compactCall) {
+        console.log(chalk.dim(`\n[manual compact 触发]`));
+        this.messages.push({
+          role: "tool",
+          tool_call_id: compactCall.id,
+          content: "压缩完成，继续对话。",
+        });
+        this.messages = await compactHistory(this.messages, this.client, this.model);
+        this.roundsSinceTodo = 0;
+        continue;
+      }
 
       // 依次执行每个工具调用，收集结果
       let usedTodo = false;
@@ -233,16 +227,13 @@ export class Session {
           input = {};
         }
 
-        // 触发钩子（用于日志、监控等）
         await this.hooks.emit("onBeforeToolCall", { name: tc.name, input });
-       
-        // 执行实际的工具函数
+
         const output = await dispatch(tc.name, input);
         await this.hooks.emit("onAfterToolCall", { name: tc.name, input, output });
 
         if (tc.name === "todo") usedTodo = true;
 
-        // 只打印前 500 字符预览，避免刷屏
         const preview = output.length > 500 ? output.slice(0, 500) + "…" : output;
         console.log(chalk.dim(preview));
 
@@ -252,11 +243,9 @@ export class Session {
       // 更新 nag 计数
       this.roundsSinceTodo = usedTodo ? 0 : this.roundsSinceTodo + 1;
 
-      // tool results 逐条追加（OpenAI 要求 role:tool 消息）
       for (const r of toolResults) {
         this.messages.push(r);
       }
-      // 连续 3 轮未调用 todo 时，额外追加一条 reminder
       if (this.roundsSinceTodo >= 3) {
         this.messages.push({ role: "user", content: "<reminder>Update your todos.</reminder>" });
       }
@@ -310,7 +299,7 @@ export class Session {
             process.stdout.write(chalk.cyan(`\n⚙ ${tc.function?.name}`));
           }
           if (tc.function?.arguments) {
-            toolCallMap[tc.index].arguments += tc.function.arguments;
+            toolCallMap[tc.index].arguments += tc.function?.arguments;
             process.stdout.write(".");
           }
         }

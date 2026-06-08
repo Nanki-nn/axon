@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  snipCompact,
   microCompact,
-  toolResultBudget,
   estimateSize,
 } from "../compaction";
 import type OpenAI from "openai";
@@ -24,45 +22,7 @@ function makeToolResult(content: string, id = "call_1"): Message {
   return { role: "tool" as const, content, tool_call_id: id };
 }
 
-// ── L1: snipCompact ───────────────────────────────────────────────────────────
-
-describe("snipCompact", () => {
-  it("消息数未超限时原样返回", () => {
-    const msgs = makeMessages(30);
-    expect(snipCompact(msgs)).toHaveLength(30);
-  });
-
-  it("消息数超过 50 时裁剪中间", () => {
-    const msgs = makeMessages(60);
-    const result = snipCompact(msgs);
-    // 头 3 + 占位符 1 + 尾 47 = 51
-    expect(result).toHaveLength(51);
-  });
-
-  it("保留头部 3 条内容不变", () => {
-    const msgs = makeMessages(60);
-    const result = snipCompact(msgs);
-    expect(result[0].content).toBe("消息 1");
-    expect(result[1].content).toBe("消息 2");
-    expect(result[2].content).toBe("消息 3");
-  });
-
-  it("保留尾部最新消息", () => {
-    const msgs = makeMessages(60);
-    const result = snipCompact(msgs);
-    expect(result[result.length - 1].content).toBe("消息 60");
-  });
-
-  it("中间插入占位符说明裁剪了多少条", () => {
-    const msgs = makeMessages(60);
-    const result = snipCompact(msgs);
-    const placeholder = result[3] as { role: string; content: string };
-    expect(placeholder.content).toContain("已压缩");
-    expect(placeholder.content).toContain("10"); // 60 - 3 - 47 = 10
-  });
-});
-
-// ── L2: microCompact ──────────────────────────────────────────────────────────
+// ── L1: microCompact ─────────────────────────────────────────────────────────
 
 describe("microCompact", () => {
   it("工具结果不超过 3 条时不压缩", () => {
@@ -102,24 +62,6 @@ describe("microCompact", () => {
     const result = microCompact(msgs);
     // 第一条虽然是旧的，但内容太短不值得压缩
     expect((result[0] as any).content).toBe(shortContent);
-  });
-});
-
-// ── L3: toolResultBudget ──────────────────────────────────────────────────────
-
-describe("toolResultBudget", () => {
-  it("总大小未超限时不处理", () => {
-    const msgs: Message[] = [
-      makeToolResult("小内容", "call_1"),
-    ];
-    const result = toolResultBudget(msgs);
-    expect((result[0] as any).content).toBe("小内容");
-  });
-
-  it("没有工具结果消息时原样返回", () => {
-    const msgs = makeMessages(5);
-    const result = toolResultBudget(msgs);
-    expect(result).toHaveLength(5);
   });
 });
 

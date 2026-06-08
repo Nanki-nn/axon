@@ -4,6 +4,7 @@ import {
   readFile, writeFile, editFile, listFiles, searchFiles,
 } from "./files";
 import { TODO_DEFINITION, TODO } from "./todo";
+import { DEFINITION as COMPACT_DEF, execute as compactExecute } from "./compact";
 import { SkillLoader } from "../skills";
 
 // 当前会话的技能加载器，由 cli.ts 在启动时注入
@@ -105,6 +106,7 @@ export function getDEFINITIONS(): object[] {
     LIST_DEFINITION,
     SEARCH_DEFINITION,
     TODO_DEFINITION,
+    COMPACT_DEF,
     TASK_DEFINITION,
     SKILL_LIST_DEFINITION,
     SKILL_READ_DEFINITION,
@@ -139,6 +141,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   list_files:   (i) => listFiles(i.pattern),
   search_files: (i) => searchFiles(i.pattern, i.path ?? "."),
   todo:         (i) => { try { return TODO.update(i.items ?? []); } catch (e: any) { return `Error: ${e.message}`; } },
+  compact:      (i) => compactExecute(),
   task:         (i) => taskRunner
     ? taskRunner(i.prompt ?? "", i.description ?? "subtask")
     : "Error: task runner not initialized",
