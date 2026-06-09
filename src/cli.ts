@@ -133,7 +133,8 @@ program
   .option("-m, --model <model>", "Model to use (e.g. deepseek-chat or anthropic:claude-3-5-sonnet)", DEFAULT_MODEL)
   .option("--yolo", "Skip all confirmations, execute directly")
   .option("--plan", "Show tool plan before each execution round, wait for user confirmation")
-  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean }) => {
+  .option("--teammate <name>", "Run as a teammate agent (used by spawnTeammate)")
+  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean; teammate?: string }) => {
     // 根据 flag 设置执行模式
     if (options.yolo) {
       setMode("yolo");
@@ -213,6 +214,48 @@ program
     if (axonConfig.mcpServers && Object.keys(axonConfig.mcpServers).length > 0) {
       console.log(chalk.dim("✓ 初始化 MCP servers..."));
       await initMcpServers(axonConfig.mcpServers);
+    }
+
+    // ── 队友模式：读取收件箱、执行任务、回复 leader ──
+    if (options.teammate) {
+      const name = options.teammate;
+      const instruction = process.env.AXON_TEAMMATE_INSTRUCTION || `你是团队成员 "${name}"，协助 leader 完成任务。`;
+      console.log(chalk.cyan(`🤝 队友 "${name}" 已启动，等待任务...`));
+
+      // 加载收件箱工具
+      const sessionForTeammate = new Session(
+        "", model, agentsContext, memoryContext, hooks, undefined, client, loader,
+      );
+
+      const { readInbox, sendMessage } = await import("./tools/teams");
+
+      // 持续监听收件箱，处理任务
+      const pollInterval = 2000; // 2 秒轮询一次
+      let consecutiveEmpty = 0;
+      const maxEmptyPolls = 5; // 连续 5 次空则退出
+
+      while (true) {
+        // 读取并清空收件箱
+        const inboxContent = readInbox(name);
+
+        if (inboxContent === "" || inboxContent.includes("收件箱为空")) {
+          consecutiveEmpty++;
+          if (consecutiveEmpty >= maxEmptyPolls) {
+            console.log(chalk.dim(`队友 "${name}" 收件箱连续 ${maxEmptyPolls} 次为空，退出。`));
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+          continue;
+        }
+        consecutiveEmpty = 0;
+
+        console.log(chalk.dim(`📬 ${name} 收到新消息，开始处理...`));
+        const fullPrompt = `${instruction}\n\n收到的消息：\n${inboxContent}\n\n请根据消息内容完成任务。完成后，使用 partner_send 工具将结果发送给 "leader"。`;
+        await sessionForTeammate.chat(fullPrompt);
+      }
+
+      await sessionForTeammate.end();
+      return;
     }
 
     // 创建 Agent 会话
