@@ -1,5 +1,14 @@
 import { spawn, ChildProcess } from "child_process";
 
+/**
+ * 后台任务工具：background_run 和 check_background
+ * 有些命令要跑好几分钟，npm install、git clone、编译等，这时候就不适合在 agent loop 里直接执行了。
+ * background_run 启动一个后台任务，立即返回一个 taskId。agent loop 继续执行后续步骤。
+ * LLM 可以通过 check_background 查询这个 taskId 的状态和输出，知道它什么时候完成了，结果是什么。
+ * agent loop 在每次调用 LLM 前也会自动注入所有已完成任务的摘要，LLM 可以据此调整后续计划。
+ */
+
+
 // ── 类型定义 ────────────────────────────────────────────────────────────────
 
 export type BackgroundTaskStatus = "running" | "completed" | "failed";

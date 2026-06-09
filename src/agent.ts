@@ -10,6 +10,7 @@ import {
   estimateSize, CONTEXT_LIMIT,
 } from "./compaction";
 import { getCompletedTasksSummaries } from "./tools/background";
+import { getTeammatesSystemPrompt } from "./tools/teams";
 import { HookSystem } from "./hooks";
 import { SkillLoader } from "./skills";
 import { runSubagent } from "./subagent";
@@ -86,6 +87,13 @@ export class Session {
     } else {
       prompt += `\n\n## Skills\nNo skills available.`;
     }
+
+    // 注入队友信息
+    const teammatesPrompt = getTeammatesSystemPrompt();
+    if (teammatesPrompt) {
+      prompt += teammatesPrompt;
+    }
+
     this.systemPrompt = prompt;
   }
 
@@ -242,6 +250,7 @@ export class Session {
 
         await this.hooks.emit("onBeforeToolCall", { name: tc.name, input });
 
+        //----工具调用分发器----
         const output = await dispatch(tc.name, input);
         await this.hooks.emit("onAfterToolCall", { name: tc.name, input, output });
 

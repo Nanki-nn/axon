@@ -3,6 +3,11 @@ import { dirname, resolve } from "path";
 import { spawnSync } from "child_process";
 import { globSync } from "glob";
 
+/**
+ * 文件操作工具集
+ * 提供安全的文件读写、编辑、列举和搜索功能，限定在工作区内，防止路径穿越攻击。
+ */
+
 const WORKDIR = process.cwd();
 
 function safePath(p: string): string {

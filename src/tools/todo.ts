@@ -1,7 +1,10 @@
 import { TaskManager } from "../task";
 
-const taskManager = new TaskManager();
+/**
+ * 任务工具模块 — 定义了一个简单的任务管理系统，支持创建、更新、列出和删除任务。
+ */
 
+const taskManager = new TaskManager();
 interface TaskTool {
   name: string;
   description: string;
