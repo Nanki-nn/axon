@@ -1,6 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { spawn, ChildProcess } from "child_process";
+
+/**
+ * 团队协作工具集
+ * 提供创建、管理和通信 AI 队友的功能。每个队友作为独立子进程运行，通过文件系统进行消息传递。
+ * 设计理念：
+ * - 简单的进程隔离：每个队友是一个独立的 Node.js 进程，环境变量区分身份。
+ * - 文件系统通信：通过写入和读取 JSONL 格式的收件箱文件进行消息传递，避免复杂的 IPC。
+ * - 配置持久化：队友的配置保存在 team.json 中，支持重启后恢复。
+ * - LLM 集成：提供系统提示注入函数，让队友信息可用于 LLM 的上下文理解。
+ * - 工具函数：提供一套工具函数（partner_create、partner_list、partner_send 等）供 LLM 调用，实现动态管理和通信。
+ */
+
 
 // ── 数据目录 ────────────────────────────────────────────────────────────────
 
@@ -63,29 +75,16 @@ const teammateProcesses = new Map<string, ChildProcess>();
 
 /**
  * 启动一个队友子进程。
- * 队友运行的是当前 axon CLI，通过 positional argument 传入 prompt。
+ * 队友运行的是当前 axon CLI，通过环境变量 AXON_TEAMMATE=1 和 AXON_TEAMMATE_NAME 标识身份。
  * 子进程的标准输入/输出与父进程隔离，通过文件收件箱通信。
  */
 function spawnTeammate(config: TeammateConfig): ChildProcess | null {
   const entryPoint = process.argv[1];
   if (!entryPoint) return null;
 
-  // 先往队友收件箱放一条启动消息，包含角色描述
-  const greeting = `## 你的角色\n你是团队中的 "${
-    config.name
-  }"。职责：${config.instruction}\n\n## 当前任务\n读取你的收件箱并处理。完成处理后，将结果通过 partner_send 发送给 leader，然后退出。`;
-  const msg: Message = {
-    from: "system",
-    to: config.name,
-    content: greeting,
-    timestamp: new Date().toISOString(),
-  };
-  appendFileSync(inboxPath(config.name), JSON.stringify(msg) + "\n", "utf-8");
-
-  const prompt = `你是团队中的 "${config.name}"。读取你的收件箱（使用 partner_read_inbox），按收到的消息工作。完成后通过 partner_send 将结果发给 leader，然后结束。`;
-
-  // 使用 tsx 来运行 TypeScript 文件
-  const child = spawn("npx", ["tsx", entryPoint, prompt], {
+  // 构建队友的指令
+  const instructionArg = `你是一个 AI 助手，作为 "${config.name}" 团队成员。你的职责：${config.instruction}`;
+  const child = spawn("npx", ["tsx", entryPoint, "--message", instructionArg], {
     cwd: process.cwd(),
     stdio: ["ignore", "pipe", "pipe"],
     env: {
@@ -126,15 +125,11 @@ function inboxPath(name: string): string {
 
 /**
  * 发送消息给一个队友（写入收件箱 JSONL 文件）。
- * "leader" 是一个特殊的收件人，表示主进程/调用者，无需在 team.json 中注册。
  */
 function sendMessage(from: string, to: string, content: string): string {
-  // "leader" 和 "self" 是特殊的系统收件人（leader 自己），不需要在 team.json 中
-  if (to !== "leader" && to !== "self") {
-    const team = loadTeam();
-    if (!team.find((t) => t.name === to)) {
-      return `错误：队友 "${to}" 不存在。使用 partner_list 查看所有队友。`;
-    }
+  const team = loadTeam();
+  if (!team.find((t) => t.name === to)) {
+    return `错误：队友 "${to}" 不存在。使用 partner_list 查看所有队友。`;
   }
 
   const msg: Message = {
@@ -145,9 +140,7 @@ function sendMessage(from: string, to: string, content: string): string {
   };
 
   try {
-    // "self" 和 "leader" 是同一个收件人，统一用 leader
-    const recipient = to === "self" ? "leader" : to;
-    const filePath = inboxPath(recipient);
+    const filePath = inboxPath(to);
     appendFileSync(filePath, JSON.stringify(msg) + "\n", "utf-8");
     return `消息已发送给 ${to}`;
   } catch (err: any) {
@@ -262,31 +255,20 @@ function partnerRemove(input: Record<string, any>): string {
   team.splice(idx, 1);
   saveTeam(team);
 
-  // 删除收件箱文件
-  try {
-    const inboxFile = inboxPath(name);
-    if (existsSync(inboxFile)) unlinkSync(inboxFile);
-  } catch { /* 静默降级 */ }
-
   return `队友 "${name}" 已移除。`;
 }
 
 /**
- * 发送消息给一个队友。队友运行时默认使用自己名字作为发件人。
+ * 发送消息给一个队友。
  */
 function partnerSend(input: Record<string, any>): string {
-  const from = process.env.AXON_TEAMMATE_NAME || "leader";
-  return sendMessage(from, input.to, input.content);
+  return sendMessage("leader", input.to, input.content);
 }
 
 /**
- * 读取收件箱：作为队友运行时读自己收件箱，作为 leader 时读 leader 收件箱。
+ * 读取自己的收件箱（作为队友时用）或 leader 的收件箱。
  */
 function partnerReadInbox(): string {
-  const teammateName = process.env.AXON_TEAMMATE_NAME;
-  if (teammateName) {
-    return readInbox(teammateName);
-  }
   return readInbox("leader");
 }
 
