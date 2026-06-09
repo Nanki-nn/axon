@@ -1,4 +1,18 @@
 import { spawn, ChildProcess } from "child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+
+// ── 持久化路径 ──────────────────────────────────────────────────────────────
+
+const DATA_DIR = join(homedir(), ".axon");
+const DATA_FILE = join(DATA_DIR, "background-tasks.json");
+
+function ensureDataDir(): void {
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
 
 // ── 类型定义 ────────────────────────────────────────────────────────────────
 
@@ -10,23 +24,59 @@ export interface BackgroundTask {
   stdout: string;
   stderr: string;
   exitCode: number | null;
-  startedAt: Date;
-  finishedAt?: Date;
-  _reported?: boolean; // 内部标记：是否已向 LLM 报告过完成状态
+  startedAt: string; // ISO string，持久化友好
+  finishedAt?: string;
+  _reported?: boolean;
 }
 
 // ── 全局状态 ────────────────────────────────────────────────────────────────
 
-const tasks = new Map<string, BackgroundTask>();
 let taskCounter = 0;
+
+/** 从硬盘加载任务记录 */
+function loadTasks(): Map<string, BackgroundTask> {
+  try {
+    ensureDataDir();
+    if (existsSync(DATA_FILE)) {
+      const raw = readFileSync(DATA_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      const map = new Map<string, BackgroundTask>(Object.entries(parsed));
+      // 恢复计数器
+      Array.from(map.keys()).forEach((key) => {
+        const num = parseInt(key.replace("bg_", ""), 10);
+        if (num > taskCounter) taskCounter = num;
+      });
+      return map;
+    }
+  } catch (e) {
+    // 文件损坏等，静默降级
+  }
+  return new Map();
+}
+
+/** 将任务记录写回硬盘 */
+function saveTasks(tasks: Map<string, BackgroundTask>): void {
+  try {
+    ensureDataDir();
+    const obj: Record<string, BackgroundTask> = {};
+    for (const [key, val] of tasks) {
+      obj[key] = val;
+    }
+    writeFileSync(DATA_FILE, JSON.stringify(obj, null, 2), "utf-8");
+  } catch (e) {
+    // 写盘失败不阻断主流程
+  }
+}
 
 // ── 核心函数 ────────────────────────────────────────────────────────────────
 
 /**
  * 在后台启动一个 shell 命令，返回 taskId。
  * 命令的输出会累积到 stdout/stderr 中，可通过 check_background 查询。
+ * 任务记录持久化到 ~/.axon/background-tasks.json。
  */
 export function backgroundRun(command: string): string {
+  const tasks = loadTasks();
   const taskId = `bg_${++taskCounter}`;
 
   const task: BackgroundTask = {
@@ -35,9 +85,10 @@ export function backgroundRun(command: string): string {
     stdout: "",
     stderr: "",
     exitCode: null,
-    startedAt: new Date(),
+    startedAt: new Date().toISOString(),
   };
   tasks.set(taskId, task);
+  saveTasks(tasks);
 
   // 在后台 spawn 执行
   const child = spawn("bash", ["-c", command], {
@@ -53,17 +104,23 @@ export function backgroundRun(command: string): string {
     task.stderr += data.toString();
   });
 
+  const onFinish = () => {
+    saveTasks(loadTasks().set(taskId, task));
+  };
+
   child.on("close", (code: number | null) => {
     task.status = code === 0 ? "completed" : "failed";
     task.exitCode = code;
-    task.finishedAt = new Date();
+    task.finishedAt = new Date().toISOString();
+    onFinish();
   });
 
   child.on("error", (err: Error) => {
     task.status = "failed";
     task.exitCode = -1;
     task.stderr += err.message;
-    task.finishedAt = new Date();
+    task.finishedAt = new Date().toISOString();
+    onFinish();
   });
 
   return taskId;
@@ -74,6 +131,7 @@ export function backgroundRun(command: string): string {
  * 任务完成时会返回完整 stdout/stdout，未完成时只返回状态信息。
  */
 export function checkBackground(taskId: string): string {
+  const tasks = loadTasks();
   const task = tasks.get(taskId);
   if (!task) {
     return JSON.stringify({ error: `任务 ${taskId} 不存在` });
@@ -86,7 +144,7 @@ export function checkBackground(taskId: string): string {
     taskId,
     status: task.status,
     command: task.command,
-    startedAt: task.startedAt.toISOString(),
+    startedAt: task.startedAt,
     exitCode: task.exitCode,
   };
 
@@ -102,7 +160,7 @@ export function checkBackground(taskId: string): string {
       task.stderr.length > MAX_OUTPUT
         ? `[输出过长，仅展示末尾 ${MAX_OUTPUT} 字符]\n` + task.stderr.slice(-MAX_OUTPUT)
         : task.stderr;
-    result.finishedAt = task.finishedAt?.toISOString();
+    result.finishedAt = task.finishedAt;
   }
 
   return JSON.stringify(result, null, 2);
@@ -113,31 +171,38 @@ export function checkBackground(taskId: string): string {
  * 用于 agent loop 在每次 LLM call 前注入结果。
  */
 export function getCompletedTasksSummaries(): string[] {
+  const tasks = loadTasks();
   const summaries: string[] = [];
+  let changed = false;
   for (const [id, task] of tasks) {
     if (task.status === "running") continue;
     if (task.status === "completed" && !task._reported) {
       task._reported = true;
+      changed = true;
       const preview = task.stdout.slice(0, 500);
       summaries.push(
         `【后台任务完成】ID: ${id}\n命令: ${task.command}\n输出: ${preview}`,
       );
     } else if (task.status === "failed" && !task._reported) {
       task._reported = true;
+      changed = true;
       const preview = task.stderr.slice(0, 500);
       summaries.push(
         `【后台任务失败】ID: ${id}\n命令: ${task.command}\n错误: ${preview}`,
       );
     }
   }
+  if (changed) saveTasks(tasks);
   return summaries;
 }
 
 /** 清除所有已完成的后台任务记录 */
 export function clearCompletedTasks(): void {
+  const tasks = loadTasks();
   for (const [id, task] of tasks) {
     if (task.status !== "running") tasks.delete(id);
   }
+  saveTasks(tasks);
 }
 
 // ── 工具定义 ────────────────────────────────────────────────────────────────

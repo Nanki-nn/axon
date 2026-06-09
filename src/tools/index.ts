@@ -12,6 +12,16 @@ import {
   backgroundRun,
   checkBackground,
 } from "./background";
+import {
+  PARTNER_CREATE_DEFINITION,
+  PARTNER_LIST_DEFINITION,
+  PARTNER_REMOVE_DEFINITION,
+  PARTNER_SEND_DEFINITION,
+  PARTNER_READ_INBOX_DEFINITION,
+  PARTNER_BROADCAST_DEFINITION,
+  PARTNER_SPAWN_DEFINITION,
+  teamToolHandlers,
+} from "./teams";
 
 // 当前会话的技能加载器，由 cli.ts 在启动时注入
 let skillLoader: SkillLoader | null = null;
@@ -126,6 +136,13 @@ export function getDEFINITIONS(): object[] {
     TASK_DEFINITION,
     SKILL_LIST_DEFINITION,
     SKILL_READ_DEFINITION,
+    PARTNER_CREATE_DEFINITION,
+    PARTNER_LIST_DEFINITION,
+    PARTNER_REMOVE_DEFINITION,
+    PARTNER_SEND_DEFINITION,
+    PARTNER_READ_INBOX_DEFINITION,
+    PARTNER_BROADCAST_DEFINITION,
+    PARTNER_SPAWN_DEFINITION,
     ...mcpDefinitions,
   ];
 }
@@ -169,6 +186,13 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
   background_run:  (i) => { const taskId = backgroundRun(i.command); return JSON.stringify({ taskId, status: "running", note: "使用 check_background 查询结果" }); },
   check_background: (i) => checkBackground(i.taskId),
+  partner_create:    (i) => teamToolHandlers.partner_create(i),
+  partner_list:      (_) => teamToolHandlers.partner_list({}),
+  partner_remove:    (i) => teamToolHandlers.partner_remove(i),
+  partner_send:      (i) => teamToolHandlers.partner_send(i),
+  partner_read_inbox:(_) => teamToolHandlers.partner_read_inbox({}),
+  partner_broadcast: (i) => teamToolHandlers.partner_broadcast(i),
+  partner_spawn:     (i) => teamToolHandlers.partner_spawn(i),
 };
 
 /**
