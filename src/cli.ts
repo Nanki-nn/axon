@@ -18,6 +18,7 @@ import { AutoDreamPlugin } from "./plugins/auto-dream";
 import { loadMemoryContext } from "./memory";
 import { initMcpServers, McpServerConfig } from "./mcp";
 import { createClient, parseModelFlag, ProviderConfig } from "./providers";
+import { printLogo } from "./logo";
 import { createAnthropicAdapter } from "./providers/anthropic";
 
 // 加载 .env 文件中的环境变量（如 DEEPSEEK_API_KEY）
@@ -96,7 +97,7 @@ function getApiKey(provider: string, configKey?: string): string {
  * 支持 Ctrl+C、exit、quit、q 等方式退出。
  */
 async function repl(session: Session): Promise<void> {
-  console.log(`${chalk.cyan("axon")}  Ctrl+C or type ${chalk.dim("exit")} to quit\n`);
+  console.log(`${chalk.dim("Ctrl+C or type exit to quit")}\n`);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = () => new Promise<string>((resolve) => rl.question(chalk.green("> "), resolve));
@@ -175,21 +176,12 @@ program
     const skillsDir = path.join(process.cwd(), ".agents", "skills");
     const loader = new SkillLoader(skillsDir);
     setSkillLoader(loader);
-    if (loader.size > 0) {
-      console.log(chalk.dim(`✓ 已加载 ${loader.size} 个 skills (${loader.names().join(", ")})`));
-    }
 
     // 加载项目上下文（从 git 根目录向 cwd 逐层查找 AGENTS.md）
     const agentsContext = loadAgentsContext();
-    if (agentsContext) {
-      console.log(chalk.dim("✓ 已加载项目上下文 (AGENTS.md)"));
-    }
 
     // 加载长期记忆（~/.axon/memory/memory.md，由 Dream 整合生成）
     const memoryContext = loadMemoryContext();
-    if (memoryContext) {
-      console.log(chalk.dim("✓ 已加载长期记忆"));
-    }
 
     // 初始化 Hook 系统，注册内置插件
     const hooks = new HookSystem();
@@ -256,6 +248,16 @@ program
 
       await sessionForTeammate.end();
       return;
+    }
+
+    // 仅在交互模式下打印 logo（非 --prompt 模式且非队友模式）
+    if (!prompt && !options.teammate) {
+      printLogo({
+        model,
+        skillNames: loader.names(),
+        hasAgentsContext: !!agentsContext,
+        hasMemory: !!memoryContext,
+      });
     }
 
     // 创建 Agent 会话
