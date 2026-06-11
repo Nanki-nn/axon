@@ -18,6 +18,7 @@ import { AutoDreamPlugin } from "./plugins/auto-dream";
 import { loadMemoryContext } from "./memory";
 import { initMcpServers, McpServerConfig } from "./mcp";
 import { createClient, parseModelFlag, ProviderConfig } from "./providers";
+import { printLogo } from "./logo";
 import { createAnthropicAdapter } from "./providers/anthropic";
 
 // 加载 .env 文件中的环境变量（如 DEEPSEEK_API_KEY）
@@ -96,7 +97,7 @@ function getApiKey(provider: string, configKey?: string): string {
  * 支持 Ctrl+C、exit、quit、q 等方式退出。
  */
 async function repl(session: Session): Promise<void> {
-  console.log(`${chalk.cyan("axon")}  Ctrl+C or type ${chalk.dim("exit")} to quit\n`);
+  console.log(`${chalk.dim("Ctrl+C or type exit to quit")}\n`);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask = () => new Promise<string>((resolve) => rl.question(chalk.green("> "), resolve));
@@ -133,7 +134,8 @@ program
   .option("-m, --model <model>", "Model to use (e.g. deepseek-chat or anthropic:claude-3-5-sonnet)", DEFAULT_MODEL)
   .option("--yolo", "Skip all confirmations, execute directly")
   .option("--plan", "Show tool plan before each execution round, wait for user confirmation")
-  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean }) => {
+  .option("--teammate <name>", "Run as a teammate agent (used by spawnTeammate)")
+  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean; teammate?: string }) => {
     // 根据 flag 设置执行模式
     if (options.yolo) {
       setMode("yolo");
@@ -174,21 +176,12 @@ program
     const skillsDir = path.join(process.cwd(), ".agents", "skills");
     const loader = new SkillLoader(skillsDir);
     setSkillLoader(loader);
-    if (loader.size > 0) {
-      console.log(chalk.dim(`✓ 已加载 ${loader.size} 个 skills (${loader.names().join(", ")})`));
-    }
 
     // 加载项目上下文（从 git 根目录向 cwd 逐层查找 AGENTS.md）
     const agentsContext = loadAgentsContext();
-    if (agentsContext) {
-      console.log(chalk.dim("✓ 已加载项目上下文 (AGENTS.md)"));
-    }
 
     // 加载长期记忆（~/.axon/memory/memory.md，由 Dream 整合生成）
     const memoryContext = loadMemoryContext();
-    if (memoryContext) {
-      console.log(chalk.dim("✓ 已加载长期记忆"));
-    }
 
     // 初始化 Hook 系统，注册内置插件
     const hooks = new HookSystem();
@@ -213,6 +206,58 @@ program
     if (axonConfig.mcpServers && Object.keys(axonConfig.mcpServers).length > 0) {
       console.log(chalk.dim("✓ 初始化 MCP servers..."));
       await initMcpServers(axonConfig.mcpServers);
+    }
+
+    // ── 队友模式：读取收件箱、执行任务、回复 leader ──
+    if (options.teammate) {
+      const name = options.teammate;
+      const instruction = process.env.AXON_TEAMMATE_INSTRUCTION || `你是团队成员 "${name}"，协助 leader 完成任务。`;
+      console.log(chalk.cyan(`🤝 队友 "${name}" 已启动，等待任务...`));
+
+      // 加载收件箱工具
+      const sessionForTeammate = new Session(
+        "", model, agentsContext, memoryContext, hooks, undefined, client, loader,
+      );
+
+      const { readInbox, sendMessage } = await import("./tools/teams");
+
+      // 持续监听收件箱，处理任务
+      const pollInterval = 2000; // 2 秒轮询一次
+      let consecutiveEmpty = 0;
+      const maxEmptyPolls = 5; // 连续 5 次空则退出
+
+      while (true) {
+        // 读取并清空收件箱
+        const inboxContent = readInbox(name);
+
+        if (inboxContent === "" || inboxContent.includes("收件箱为空")) {
+          consecutiveEmpty++;
+          if (consecutiveEmpty >= maxEmptyPolls) {
+            console.log(chalk.dim(`队友 "${name}" 收件箱连续 ${maxEmptyPolls} 次为空，退出。`));
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
+          continue;
+        }
+        consecutiveEmpty = 0;
+
+        console.log(chalk.dim(`📬 ${name} 收到新消息，开始处理...`));
+        const fullPrompt = `${instruction}\n\n收到的消息：\n${inboxContent}\n\n请根据消息内容完成任务。完成后，使用 partner_send 工具将结果发送给 "leader"。`;
+        await sessionForTeammate.chat(fullPrompt);
+      }
+
+      await sessionForTeammate.end();
+      return;
+    }
+
+    // 仅在交互模式下打印 logo（非 --prompt 模式且非队友模式）
+    if (!prompt && !options.teammate) {
+      printLogo({
+        model,
+        skillNames: loader.names(),
+        hasAgentsContext: !!agentsContext,
+        hasMemory: !!memoryContext,
+      });
     }
 
     // 创建 Agent 会话

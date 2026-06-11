@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import { join } from "path";
 import { spawn, ChildProcess } from "child_process";
 
+
 /**
  * 团队协作工具集
  * 提供创建、管理和通信 AI 队友的功能。每个队友作为独立子进程运行，通过文件系统进行消息传递。
@@ -11,6 +12,7 @@ import { spawn, ChildProcess } from "child_process";
  * - 配置持久化：队友的配置保存在 team.json 中，支持重启后恢复。
  * - LLM 集成：提供系统提示注入函数，让队友信息可用于 LLM 的上下文理解。
  * - 工具函数：提供一套工具函数（partner_create、partner_list、partner_send 等）供 LLM 调用，实现动态管理和通信。
+
  */
 
 

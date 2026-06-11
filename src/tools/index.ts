@@ -7,6 +7,16 @@ import { TODO_DEFINITION, TODO, taskTools } from "./todo";
 import { DEFINITION as COMPACT_DEF, execute as compactExecute } from "./compact";
 import { SkillLoader } from "../skills";
 import {
+  teamToolHandlers,
+  PARTNER_CREATE_DEFINITION,
+  PARTNER_LIST_DEFINITION,
+  PARTNER_REMOVE_DEFINITION,
+  PARTNER_SEND_DEFINITION,
+  PARTNER_READ_INBOX_DEFINITION,
+  PARTNER_BROADCAST_DEFINITION,
+  PARTNER_SPAWN_DEFINITION,
+} from "./teams";
+import {
   BACKGROUND_RUN_DEFINITION,
   CHECK_BACKGROUND_DEFINITION,
   backgroundRun,
@@ -131,6 +141,13 @@ export function getDEFINITIONS(): object[] {
     TASK_DEFINITION,
     SKILL_LIST_DEFINITION,
     SKILL_READ_DEFINITION,
+    PARTNER_CREATE_DEFINITION,
+    PARTNER_LIST_DEFINITION,
+    PARTNER_REMOVE_DEFINITION,
+    PARTNER_SEND_DEFINITION,
+    PARTNER_READ_INBOX_DEFINITION,
+    PARTNER_BROADCAST_DEFINITION,
+    PARTNER_SPAWN_DEFINITION,
     ...mcpDefinitions,
   ];
 }
@@ -174,6 +191,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
   background_run:  (i) => { const taskId = backgroundRun(i.command); return JSON.stringify({ taskId, status: "running", note: "使用 check_background 查询结果" }); },
   check_background: (i) => checkBackground(i.taskId),
+  ...teamToolHandlers,
 };
 
 /**

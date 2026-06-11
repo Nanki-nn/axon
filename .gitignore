@@ -9,3 +9,4 @@ skills-lock.json
 axon.config.json
 mypackage/
 .tasks/
+debug-messages.log
