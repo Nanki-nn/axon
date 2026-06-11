@@ -2,7 +2,6 @@
 ![alt text](image.png)
 
 > axon 是一个跑在本地命令行的 AI  Agent...
-
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/Node-18%2B-339933)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
