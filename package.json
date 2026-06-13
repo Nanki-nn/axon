@@ -8,6 +8,7 @@
   },
   "files": [
     "dist/",
+    "docs/assets/",
     "!dist/__tests__/"
   ],
   "scripts": {

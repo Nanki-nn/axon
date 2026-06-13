@@ -1,5 +1,5 @@
 # axon
-![alt text](image.png)
+![Axon CLI](docs/assets/axon.png)
 
 > axon 是一个跑在本地命令行的 AI  Agent...
 ![License](https://img.shields.io/badge/license-MIT-blue)
