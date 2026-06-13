@@ -1,7 +1,7 @@
 # axon
 ![Axon CLI](docs/assets/axon.png)
 
-> axon 是一个跑在本地命令行的 AI  Agent...
+> axon 是一个跑在本地命令行的 AI Agent。
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/Node-18%2B-339933)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
@@ -16,7 +16,7 @@
 
 ---
 
-axon 是一个面向本地开发与自动化任务的 **CLI Agent 框架**，类 ClaudeCode 设计。统一接入 OpenAI / Anthropic / Gemini / DeepSeek / Qwen / MiniMax 等主流模型，原生支持 **工具调用、MCP 扩展、Skill 渐进披露、长期记忆和项目级指令注入**。
+axon 是一个面向本地工作区和自动化任务的 **CLI Agent 框架**。统一接入 OpenAI / Anthropic / Gemini / DeepSeek / Qwen / MiniMax 等主流模型，原生支持 **工具调用、MCP 扩展、Skill 渐进披露、长期记忆和项目级指令注入**。
 
 ## 📦 项目简介
 
@@ -38,6 +38,19 @@ axon 是单仓 TypeScript 项目，纯 Node 运行，零浏览器依赖：
 | **🪝 Hook 生命周期** | 工具调用前后、LLM 采样后、压缩前后、单轮 / 会话结束等事件钩子 | `hooks.ts` `plugins/` |
 | **💾 长期记忆 & Auto-Dream** | 会话摘要落盘；满足条件后台触发 LLM 整合，注入下次会话 system prompt | `memory.ts` `plugins/auto-dream.ts` |
 | **📉 4 层上下文压缩** | L1 消息裁剪 → L2 工具结果占位符 → L3 大结果持久化 → L4 LLM 摘要 | `compaction.ts` |
+
+### 🧭 机制拆解文章
+
+后续会围绕 axon 的核心机制持续补充设计文章，记录从最小可用 Agent 到可产品化本地助手的实现细节。
+
+| 主题 | 关注问题 | 当前入口 | 文章状态 |
+|---|---|---|---|
+| Agent Loop | 模型如何在“思考 → 工具调用 → 观察结果 → 继续推理”之间循环 | `src/agent.ts` | 计划中 |
+| 任务规划 | 如何把多步骤任务拆解、跟踪状态，并在执行中持续更新进度 | `src/task.ts` `src/tools/todo.ts` | 计划中 |
+| 工具系统 | 工具 schema、注册、分发、结果回填和错误恢复如何设计 | `src/tools/` | 计划中 |
+| 权限与安全 | 命令确认、危险操作拦截、文件访问边界和执行风险如何控制 | `src/tools/bash.ts` `src/mode.ts` | 计划中 |
+| 记忆系统 | 长期记忆如何保存、索引、召回、注入，以及如何做离线评测 | `src/features/memory/` | [设计文章](docs/memory-system-design.md) |
+| 技能系统 | `SKILL.md` 如何实现渐进披露，让模型按需加载领域能力 | `src/skills.ts` | 计划中 |
 
 ### 🧰 模型可调用的工具
 
@@ -63,29 +76,63 @@ axon 是单仓 TypeScript 项目，纯 Node 运行，零浏览器依赖：
 
 ### 1️⃣ 安装
 
-**方式一：npm 全局安装（推荐）**
+**方式一：从 npm 安装（发布后推荐）**
 
 ```bash
 npm install -g axon-cli
 ```
 
-**方式二：从源码安装**
+安装后会得到 `axon` 命令：
+
+```bash
+axon --help
+```
+
+**方式二：从源码安装（当前开发推荐）**
 
 ```bash
 git clone https://github.com/yourusername/axon
 cd axon
-npm install && npm run build && npm install -g .
+npm install
+npm run build
+npm link
+```
+
+也可以不用 `npm link`，直接在项目目录里执行：
+
+```bash
+npm run dev -- "你好"
 ```
 
 ### 2️⃣ 配置 API Key
 
 任选其一即可：
 
-基于 DeepSeek API 的终端 AI 编码助手。自举式开发——用 AI 开发 AI 工具。
+**方式一：环境变量**
 
-# 方式二：环境变量
+```bash
 export DEEPSEEK_API_KEY=your-key-here
 ```
+
+**方式二：项目配置**
+
+```bash
+mkdir -p .axon
+cp .axon/config.example.json .axon/config.json
+```
+
+然后编辑 `.axon/config.json`：
+
+```json
+{
+  "provider": "deepseek",
+  "model": "deepseek-chat",
+  "apiKey": "${DEEPSEEK_API_KEY}",
+  "baseURL": "https://api.deepseek.com"
+}
+```
+
+> 推荐在配置文件中使用 `${ENV_VAR}` 引用环境变量，避免把 key 明文写进项目文件。
 
 ### 3️⃣ 开始使用
 
@@ -95,7 +142,7 @@ axon "解释这段代码"                          # 单次执行
 axon --yolo "批量重命名 src/ 下的文件"       # 跳过所有确认
 axon --plan "重构认证模块"                   # 执行前展示计划，逐步确认
 axon --model anthropic:claude-3-5-sonnet "review 代码"
-npm run dev -- "prompt"                     # 开发时免 build
+npm run dev -- "prompt"                     # 源码开发时免 build
 ```
 
 ## 🔄 切换模型
