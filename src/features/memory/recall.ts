@@ -1,3 +1,6 @@
+/**
+ * 语义召回，sideQuery 选择相关记忆，限制单文件 4KB、单会话 60KB
+ */
 import { readFileSync, readdirSync } from "fs";
 import { getStructuredMemoryDir } from "./paths";
 import { formatMemoryManifest, scanMemoryHeaders } from "./store";
@@ -6,7 +9,7 @@ import { RelevantMemory, SideQueryFn } from "./types";
 const MAX_MEMORY_BYTES_PER_FILE = 4096;
 export const MAX_SESSION_MEMORY_BYTES = 60 * 1024;
 
-const SELECT_MEMORIES_PROMPT = `You are selecting memories that will be useful to an AI assistant as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
+const SELECT_MEMORIES_PROMPT = `You are selecting memories that will be useful to an AI coding assistant as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
 
 Return a JSON object with a "selected_memories" array of filenames for the memories that will clearly be useful (up to 5). Only include memories that you are certain will be helpful based on their name and description.
 - If you are unsure if a memory will be useful, do not include it.
