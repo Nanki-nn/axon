@@ -14,6 +14,7 @@ import { getTeammatesSystemPrompt } from "./tools/teams";
 import { HookSystem } from "./hooks";
 import { SkillLoader } from "./skills";
 import { runSubagent } from "./subagent";
+import { logger } from "./logger";
 
 export const DEFAULT_MODEL = "deepseek-chat";
 
@@ -70,7 +71,7 @@ export class Session {
 
     // 注册 task 工具的执行函数（闭包捕获 client/model/definitions）
     setTaskRunner((prompt, description) => {
-      console.log(chalk.dim(`  [task] ${description}: ${prompt.slice(0, 80)}`));
+      logger.info("agent", `[task] ${description}: ${prompt.slice(0, 80)}`);
       return runSubagent(prompt, this.client, this.model, getDEFINITIONS());
     });
 
@@ -150,7 +151,7 @@ export class Session {
 
       // ── 1b. L2: auto_compact（体积超限时 LLM 摘要压缩） ──
       if (estimateSize(this.messages) > CONTEXT_LIMIT) {
-        console.log(chalk.dim("[auto compact 触发]"));
+        logger.info("agent", "auto compact 触发");
         this.messages = await compactHistory(this.messages, this.client, this.model);
       }
 
@@ -173,7 +174,7 @@ export class Session {
           err?.message?.toLowerCase().includes("too many tokens");
 
         if (isOverLimit) {
-          console.log(chalk.dim("[error: token 超限，紧急压缩]"));
+          logger.warn("agent", "token 超限，紧急压缩");
           this.messages = await compactHistory(this.messages, this.client, this.model);
           continue;
         }
@@ -224,7 +225,7 @@ export class Session {
       // L3: compact 工具（LLM 手动触发 auto_compact）
       const compactCall = toolCalls.find(tc => tc.name === "compact");
       if (compactCall) {
-        console.log(chalk.dim(`\n[manual compact 触发]`));
+        logger.info("agent", "manual compact 触发");
         this.messages.push({
           role: "tool",
           tool_call_id: compactCall.id,

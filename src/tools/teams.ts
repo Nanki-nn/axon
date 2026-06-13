@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { spawn, ChildProcess } from "child_process";
+import { logger } from "../logger";
 
 
 /**
@@ -97,20 +98,22 @@ function spawnTeammate(config: TeammateConfig): ChildProcess | null {
   });
 
   child.stdout?.on("data", (data: Buffer) => {
-    console.log(`[队友 ${config.name}] ${data.toString().trim()}`);
+    const text = data.toString().trim();
+    if (text) logger.info("teams", `[${config.name}] ${text}`);
   });
 
   child.stderr?.on("data", (data: Buffer) => {
-    console.error(`[队友 ${config.name} stderr] ${data.toString().trim()}`);
+    const text = data.toString().trim();
+    if (text) logger.error("teams", `[${config.name}] ${text}`);
   });
 
   child.on("exit", (code) => {
-    console.log(`[队友 ${config.name}] 进程退出，退出码: ${code}`);
+    logger.info("teams", `队友 "${config.name}" 进程退出，退出码: ${code}`);
     teammateProcesses.delete(config.name);
   });
 
   child.on("error", (err) => {
-    console.error(`[队友 ${config.name}] 启动失败: ${err.message}`);
+    logger.error("teams", `队友 "${config.name}" 启动失败: ${err.message}`);
     teammateProcesses.delete(config.name);
   });
 
@@ -128,7 +131,7 @@ function inboxPath(name: string): string {
 /**
  * 发送消息给一个队友（写入收件箱 JSONL 文件）。
  */
-function sendMessage(from: string, to: string, content: string): string {
+export function sendMessage(from: string, to: string, content: string): string {
   const team = loadTeam();
   if (!team.find((t) => t.name === to)) {
     return `错误：队友 "${to}" 不存在。使用 partner_list 查看所有队友。`;
@@ -153,7 +156,7 @@ function sendMessage(from: string, to: string, content: string): string {
 /**
  * 读取并清空收件箱中的所有消息。
  */
-function readInbox(name: string): string {
+export function readInbox(name: string): string {
   const filePath = inboxPath(name);
   if (!existsSync(filePath)) return "收件箱为空。";
 

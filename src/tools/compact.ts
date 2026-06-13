@@ -1,5 +1,6 @@
 /**
- * compact 工具 — 手动压缩（L3）
+/**
+ * compact 工具 — 手动压缩
  *
  * LLM 主动调用此工具来压缩对话上下文。
  * 实际压缩由 agent loop 捕获 "__NEED_COMPACT__" 标记后执行。

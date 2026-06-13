@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import OpenAI from "openai";
-import chalk from "chalk";
+import { logger } from "./logger";
 
 /**
  * 三层 context 压缩流水线（参考 claude-code s06_context_compact.py）
@@ -66,7 +66,7 @@ export async function compactHistory(
   model: string
 ): Promise<Message[]> {
   const transcriptPath = writeTranscript(messages);
-  console.log(chalk.dim(`[transcript 已保存: ${transcriptPath}]`));
+  logger.info("compact", `transcript 已保存: ${transcriptPath}`);
 
   const summary = await summarizeHistory(messages, client, model);
 

@@ -20,6 +20,7 @@ import { initMcpServers, McpServerConfig } from "./mcp";
 import { createClient, parseModelFlag, ProviderConfig } from "./providers";
 import { printLogo } from "./logo";
 import { createAnthropicAdapter } from "./providers/anthropic";
+import { logger, configureLogger, LogLevel } from "./logger";
 
 // 加载 .env 文件中的环境变量（如 DEEPSEEK_API_KEY）
 config();
@@ -134,8 +135,20 @@ program
   .option("-m, --model <model>", "Model to use (e.g. deepseek-chat or anthropic:claude-3-5-sonnet)", DEFAULT_MODEL)
   .option("--yolo", "Skip all confirmations, execute directly")
   .option("--plan", "Show tool plan before each execution round, wait for user confirmation")
+  .option("--log-level <level>", "Log level: debug|info|warn|error|silent", "info")
+  .option("--log-file <file>", "Log output file path")
   .option("--teammate <name>", "Run as a teammate agent (used by spawnTeammate)")
-  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean; teammate?: string }) => {
+  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean; logLevel?: string; logFile?: string; teammate?: string }) => {
+    // 配置日志系统
+    const levelMap: Record<string, LogLevel> = {
+      debug: LogLevel.DEBUG, info: LogLevel.INFO, warn: LogLevel.WARN,
+      error: LogLevel.ERROR, silent: LogLevel.SILENT,
+    };
+    configureLogger({
+      level: levelMap[options.logLevel || "info"] ?? LogLevel.INFO,
+      file: options.logFile || undefined,
+    });
+
     // 根据 flag 设置执行模式
     if (options.yolo) {
       setMode("yolo");
@@ -197,6 +210,7 @@ program
           const plugin = require(resolved) as AxonPlugin;
           hooks.register(plugin);
         } catch (err: any) {
+          logger.error("cli", `加载插件失败 '${pluginPath}': ${err.message}`);
           console.error(chalk.yellow(`⚠ Failed to load plugin '${pluginPath}': ${err.message}`));
         }
       }
@@ -204,7 +218,7 @@ program
 
     // 初始化 MCP 服务端（如果配置了的话）
     if (axonConfig.mcpServers && Object.keys(axonConfig.mcpServers).length > 0) {
-      console.log(chalk.dim("✓ 初始化 MCP servers..."));
+      logger.info("cli", "初始化 MCP servers...");
       await initMcpServers(axonConfig.mcpServers);
     }
 
@@ -212,6 +226,7 @@ program
     if (options.teammate) {
       const name = options.teammate;
       const instruction = process.env.AXON_TEAMMATE_INSTRUCTION || `你是团队成员 "${name}"，协助 leader 完成任务。`;
+      logger.info("teams", `队友 "${name}" 已启动`);
       console.log(chalk.cyan(`🤝 队友 "${name}" 已启动，等待任务...`));
 
       // 加载收件箱工具
@@ -252,12 +267,7 @@ program
 
     // 仅在交互模式下打印 logo（非 --prompt 模式且非队友模式）
     if (!prompt && !options.teammate) {
-      printLogo({
-        model,
-        skillNames: loader.names(),
-        hasAgentsContext: !!agentsContext,
-        hasMemory: !!memoryContext,
-      });
+      printLogo();
     }
 
     // 创建 Agent 会话

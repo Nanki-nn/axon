@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import chalk from "chalk";
 import { dispatch } from "./tools";
+import { logger } from "./logger";
 
 /**
  * Subagent 系统提示：比 parent 更简洁，只聚焦完成任务并汇报结果。
@@ -70,10 +70,10 @@ export async function runSubagent(
       let input: Record<string, unknown> = {};
       try { input = JSON.parse(tc.function.arguments); } catch { /* ignore */ }
 
-      console.log(chalk.dim(`  [subagent] ${name}`));
+      logger.info("subagent", `调用工具: ${name}`);
       const output = await dispatch(name, input);
       const preview = output.length > 200 ? output.slice(0, 200) + "…" : output;
-      console.log(chalk.dim(`    ${preview}`));
+      logger.debug("subagent", `输出: ${preview}`);
 
       messages.push({ role: "tool", tool_call_id: tc.id, content: output });
     }

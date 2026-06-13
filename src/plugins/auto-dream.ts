@@ -1,7 +1,7 @@
 import OpenAI from "openai";
-import chalk from "chalk";
 import { AxonPlugin } from "../hooks";
 import { appendSessionLog, runDream, shouldDream } from "../memory";
+import { logger } from "../logger";
 import {
   getSessionCount,
   getLastDreamAt,
@@ -58,14 +58,14 @@ export class AutoDreamPlugin implements AxonPlugin {
     const lastDream = getLastDreamAt();
 
     if (shouldDream(count, lastDream)) {
-      console.log(chalk.dim("[Auto-Dream: 后台整合记忆...]"));
+      logger.info("dream", "开始后台整合记忆...");
       // 异步执行，避免阻塞会话结束
       setImmediate(async () => {
         try {
           await runDream(this.client, this.model);
           resetDreamTimestamp(); // Dream 完成后重置计时器
         } catch (err: any) {
-          console.error(chalk.dim(`[Auto-Dream 失败: ${err.message}]`));
+          logger.error("dream", `整合记忆失败: ${err.message}`);
         }
       });
     }

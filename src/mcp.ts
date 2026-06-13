@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import { registerMcpTool } from "./tools";
+import { logger } from "./logger";
 
 // ── JSON-RPC 2.0 基础类型 ──────────────────────────────────────────────────────
 
@@ -201,8 +202,7 @@ export async function initMcpServers(
 
       clients.push(client);
     } catch (err: any) {
-      // MCP 服务端初始化失败是非致命的，记录日志后继续
-      process.stderr.write(`[MCP] Failed to init '${serverName}': ${err.message}\n`);
+      logger.error("mcp", `Failed to init '${serverName}': ${err.message}`);
     }
   }
 
