@@ -80,7 +80,7 @@ async function summarizeHistory(
   const conversation = JSON.stringify(messages).slice(0, 80_000);
 
   const prompt =
-    "请将以下编程助手对话历史压缩成摘要，以便继续工作。\n" +
+    "请将以下 AI 助手对话历史压缩成摘要，以便继续工作。\n" +
     "需要保留：1.当前目标 2.关键发现和决策 3.已读取/修改的文件 4.剩余工作 5.用户约束。\n" +
     "要求简洁但具体。\n\n" +
     conversation;

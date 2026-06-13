@@ -32,7 +32,7 @@ const AXON_ART = [
  */
 export function printLogo(): void {
   const logo = AXON_ART.map((line) => chalk.cyan(line)).join("\n");
-  const tagline = `${chalk.dim("v" + getVersion())}  ${chalk.gray("·")}  ${chalk.dim("AI coding assistant, right in your terminal")}`;
+  const tagline = `${chalk.dim("v" + getVersion())}  ${chalk.gray("·")}  ${chalk.dim("Local AI assistant, right in your terminal")}`;
 
   console.log(`\n${logo}\n\n  ${tagline}\n`);
 }

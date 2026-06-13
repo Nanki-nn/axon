@@ -136,7 +136,7 @@ const program = new Command();
 
 program
   .name("axon")
-  .description("AI coding assistant")
+  .description("Local AI assistant")
   .argument("[prompt]", "Prompt to send (omit for interactive REPL)")
   .option("-m, --model <model>", "Model to use (e.g. deepseek-chat or anthropic:claude-3-5-sonnet)", DEFAULT_MODEL)
   .option("--yolo", "Skip all confirmations, execute directly")

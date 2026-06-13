@@ -1,3 +1,7 @@
+/**
+ * 新工具定义和 handler
+ */
+
 import { deleteMemory, listMemories, readMemory, saveMemory } from "./store";
 import { MemoryType } from "./types";
 

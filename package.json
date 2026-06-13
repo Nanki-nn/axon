@@ -1,7 +1,7 @@
 {
   "name": "axon-cli",
   "version": "0.1.0",
-  "description": "A minimal AI coding assistant CLI powered by DeepSeek, OpenAI, Anthropic and more",
+  "description": "A minimal local AI assistant CLI powered by DeepSeek, OpenAI, Anthropic and more",
   "main": "dist/cli.js",
   "bin": {
     "axon": "./dist/cli.js"
@@ -16,6 +16,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:memory": "tsx src/evals/memory-offline.ts",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "prepublishOnly": "npm run build"
@@ -24,7 +25,7 @@
     "ai",
     "cli",
     "agent",
-    "coding-assistant",
+    "ai-assistant",
     "deepseek",
     "openai",
     "anthropic",

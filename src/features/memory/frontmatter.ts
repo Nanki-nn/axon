@@ -1,3 +1,7 @@
+/**
+ * Markdown frontmatter 解析/格式化 
+ */
+
 export interface FrontmatterResult {
   meta: Record<string, string>;
   body: string;

@@ -1,3 +1,6 @@
+/**
+ * memory_save/list/read/delete 底层存储和 MEMORY.md 索引维护
+ */
 import {
   existsSync,
   readFileSync,
