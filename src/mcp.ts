@@ -29,7 +29,7 @@ interface McpToolSchema {
   };
 }
 
-/** axon.config.json 中 mcpServers 字段的单条配置 */
+/** .axon/config.json 中 mcpServers 字段的单条配置 */
 export interface McpServerConfig {
   command: string;       // 启动命令，例如 "node" 或 "python"
   args?: string[];       // 命令行参数

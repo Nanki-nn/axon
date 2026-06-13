@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-
-const TASKS_DIR = path.join(process.cwd(), ".tasks");
+import { getTasksDir } from "./project-paths";
 
 export interface Task {
   id: string;
@@ -14,10 +13,12 @@ export interface Task {
 
 export class TaskManager {
   private tasks: Map<string, Task> = new Map();
+  private tasksDir: string;
 
   constructor() {
-    if (!fs.existsSync(TASKS_DIR)) {
-      fs.mkdirSync(TASKS_DIR, { recursive: true });
+    this.tasksDir = getTasksDir();
+    if (!fs.existsSync(this.tasksDir)) {
+      fs.mkdirSync(this.tasksDir, { recursive: true });
     }
     this._loadAll();
   }
@@ -121,7 +122,7 @@ export class TaskManager {
   }
 
   private _taskPath(id: string): string {
-    return path.join(TASKS_DIR, `task_${id}.json`);
+    return path.join(this.tasksDir, `task_${id}.json`);
   }
 
   private _save(task: Task): void {
@@ -134,11 +135,11 @@ export class TaskManager {
   }
 
   private _loadAll(): void {
-    if (!fs.existsSync(TASKS_DIR)) return;
-    for (const file of fs.readdirSync(TASKS_DIR)) {
+    if (!fs.existsSync(this.tasksDir)) return;
+    for (const file of fs.readdirSync(this.tasksDir)) {
       const match = file.match(/^task_(\d+)\.json$/);
       if (!match) continue;
-      const fp = path.join(TASKS_DIR, file);
+      const fp = path.join(this.tasksDir, file);
       try {
         const data = JSON.parse(fs.readFileSync(fp, "utf-8"));
         this.tasks.set(data.id, data as Task);

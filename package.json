@@ -9,6 +9,7 @@
   "files": [
     "dist/",
     "docs/assets/",
+    ".axon/config.example.json",
     "!dist/__tests__/"
   ],
   "scripts": {

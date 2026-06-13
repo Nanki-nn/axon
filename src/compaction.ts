@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import OpenAI from "openai";
 import { logger } from "./logger";
+import { getTranscriptsDir } from "./project-paths";
 
 /**
  * 三层 context 压缩流水线（参考 claude-code s06_context_compact.py）
@@ -18,9 +19,6 @@ const KEEP_RECENT_RESULTS = 3;
 
 /** messages 总大小超过此值触发 auto_compact */
 const CONTEXT_LIMIT = 80_000;
-
-/** transcript 存储目录 */
-const TRANSCRIPT_DIR = path.join(process.cwd(), ".transcripts");
 
 type Message = OpenAI.Chat.ChatCompletionMessageParam;
 
@@ -99,8 +97,9 @@ async function summarizeHistory(
 
 /** 把 messages 写入带时间戳的 JSONL 文件 */
 function writeTranscript(messages: Message[]): string {
-  fs.mkdirSync(TRANSCRIPT_DIR, { recursive: true });
-  const filePath = path.join(TRANSCRIPT_DIR, `transcript-${Date.now()}.jsonl`);
+  const transcriptDir = getTranscriptsDir();
+  fs.mkdirSync(transcriptDir, { recursive: true });
+  const filePath = path.join(transcriptDir, `transcript-${Date.now()}.jsonl`);
   const lines = messages.map((m) => JSON.stringify(m)).join("\n");
   fs.writeFileSync(filePath, lines, "utf-8");
   return filePath;

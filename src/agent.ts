@@ -15,6 +15,13 @@ import { HookSystem } from "./hooks";
 import { SkillLoader } from "./skills";
 import { runSubagent } from "./subagent";
 import { logger } from "./logger";
+import {
+  buildMemoryPromptSection,
+  formatMemoriesForInjection,
+  recallMemories,
+  SideQueryFn,
+} from "./features/memory";
+import { getDebugLogPath } from "./project-paths";
 
 export const DEFAULT_MODEL = "deepseek-chat";
 
@@ -51,6 +58,10 @@ export class Session {
   private hooks: HookSystem;
   /** 连续未调用 todo 工具的轮数，达到阈值时注入 reminder */
   private roundsSinceTodo = 0;
+  /** 本会话已注入过的结构化记忆，避免重复刷屏 */
+  private alreadySurfacedMemories = new Set<string>();
+  /** 本会话累计注入的结构化记忆字节数，避免撑爆上下文 */
+  private sessionMemoryBytes = 0;
 
   constructor(
     apiKey: string,
@@ -80,6 +91,7 @@ export class Session {
     if (memoryContext) {
       prompt += `\n\n## 长期记忆\n${memoryContext}`;
     }
+    prompt += `\n\n${buildMemoryPromptSection()}`;
     if (agentsContext) {
       prompt += `\n\n## 项目上下文（来自 AGENTS.md）\n${agentsContext}`;
     }
@@ -103,6 +115,7 @@ export class Session {
    */
   async chat(userMessage: string): Promise<void> {
     this.messages.push({ role: "user", content: userMessage });
+    await this.injectRelevantMemories(userMessage);
     await this.runLoop();
     // 本轮结束，触发插件钩子（如记录会话日志）
     await this.hooks.emit("onTurnEnd", { messages: this.messages });
@@ -115,12 +128,55 @@ export class Session {
 
   // ── private ────────────────────────────────────────────────────────────────
 
+  private buildSideQuery(): SideQueryFn {
+    return async (system, userMessage) => {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userMessage },
+        ],
+        max_tokens: 256,
+        stream: false,
+      });
+      return response.choices[0]?.message?.content ?? "";
+    };
+  }
+
+  private async injectRelevantMemories(userMessage: string): Promise<void> {
+    try {
+      const memories = await recallMemories(
+        userMessage,
+        this.buildSideQuery(),
+        this.alreadySurfacedMemories,
+        this.sessionMemoryBytes,
+      );
+      if (memories.length === 0) return;
+
+      const injection = formatMemoriesForInjection(memories);
+      const last = this.messages[this.messages.length - 1];
+      if (last?.role === "user" && typeof last.content === "string") {
+        last.content = `${last.content}\n\n${injection}`;
+      } else {
+        this.messages.push({ role: "user", content: injection });
+      }
+
+      for (const memory of memories) {
+        this.alreadySurfacedMemories.add(memory.path);
+        this.sessionMemoryBytes += Buffer.byteLength(memory.content);
+      }
+    } catch (err: any) {
+      logger.warn("memory", `结构化记忆召回失败: ${err.message}`);
+    }
+  }
+
   /**
    * 核心 Agent 循环：不断调用 LLM → 执行工具 → 再调用 LLM，
    * 直到 finishReason 不是 "tool_calls" 为止。
    */
   private debugMessages(tag: string): void {
-    const logPath = path.join(process.cwd(), "debug-messages.log");
+    const logPath = getDebugLogPath();
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
     const lines: string[] = [];
     lines.push(`\n[${new Date().toISOString()}] ${tag} — messages 共 ${this.messages.length} 条`);
     for (const msg of this.messages) {

@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import OpenAI from "openai";
+import { getDreamMemoryDir } from "./project-paths";
 
-// 长期记忆的文件存储路径（~/.axon/memory/）
-const MEMORY_DIR = path.join(os.homedir(), ".axon", "memory");
+// 长期记忆的文件存储路径（./.axon/memory/dream/）
+const MEMORY_DIR = getDreamMemoryDir();
 const SESSIONS_DIR = path.join(MEMORY_DIR, "sessions");     // 每日会话日志目录
 const MEMORY_FILE = path.join(MEMORY_DIR, "memory.md");     // 整合后的长期记忆
 const LOCK_FILE = path.join(MEMORY_DIR, ".dream.lock");     // Dream 进程锁，防并发

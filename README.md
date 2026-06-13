@@ -100,7 +100,7 @@ npm run dev -- "prompt"                     # 开发时免 build
 
 ## 🔄 切换模型
 
-格式 `--model provider:model`，或在 `axon.config.json` 里配默认值。
+格式 `--model provider:model`，或在 `.axon/config.json` 里配默认值。
 
 | provider | 模型示例 | 环境变量 |
 |---|---|---|
@@ -128,9 +128,9 @@ npm run dev -- "prompt"                     # 开发时免 build
 }
 ```
 
-### 项目配置 `axon.config.json`
+### 项目配置 `.axon/config.json`
 
-放在项目根目录，覆盖全局：
+放在项目根目录的 `.axon/` 下，覆盖全局：
 
 ```json
 {
@@ -152,10 +152,10 @@ npm run dev -- "prompt"                     # 开发时免 build
 
 ### 🎓 Skills
 
-`.agents/skills/<name>/SKILL.md`，启动时自动发现，模型通过 `skill_list` / `skill_read` 按需加载。
+`.axon/skills/<name>/SKILL.md`，启动时自动发现，模型通过 `skill_list` / `skill_read` 按需加载。
 
 ```
-.agents/skills/
+.axon/skills/
 └── company-valuation/
     ├── SKILL.md        # frontmatter(name, description) + 正文
     ├── references/     # skill_read 时列出文件名供模型按需读取
@@ -164,12 +164,12 @@ npm run dev -- "prompt"                     # 开发时免 build
 
 ### 🔌 MCP
 
-`axon.config.json` 里配 `mcpServers`，启动时自动 spawn 子进程，工具名格式 `serverName__toolName`。内置轻量 JSON-RPC，**不依赖 MCP SDK**。
+`.axon/config.json` 里配 `mcpServers`，启动时自动 spawn 子进程，工具名格式 `serverName__toolName`。内置轻量 JSON-RPC，**不依赖 MCP SDK**。
 
 ### 💾 记忆
 
-- 每轮结束追加摘要到 `~/.axon/memory/sessions/YYYY-MM-DD.md`
-- 触发条件（≥ 10 次会话 或 距上次 > 24h）：后台加文件锁，LLM 整合进 `~/.axon/memory/memory.md`
+- 每轮结束追加摘要到 `.axon/memory/dream/sessions/YYYY-MM-DD.md`
+- 触发条件（≥ 10 次会话 或 距上次 > 24h）：后台加文件锁，LLM 整合进 `.axon/memory/dream/memory.md`
 - 启动时自动注入 system prompt（最多 8KB）
 
 ### 🪝 插件
@@ -183,7 +183,7 @@ module.exports = {
 };
 ```
 
-配在 `axon.config.json` 的 `plugins` 数组里。
+配在 `.axon/config.json` 的 `plugins` 数组里。
 
 ### 📋 项目上下文
 
@@ -199,7 +199,7 @@ module.exports = {
 - 💡 **提出需求**：有好的功能想法欢迎开 Issue 讨论
 - 🔧 **提交代码**：Fork 仓库后开发新功能或修复 Bug，完成后发 Pull Request
 - 📖 **完善文档**：改进 README、补充注释、优化示例等
-- 🎓 **贡献 Skill**：在 `.agents/skills/` 下贡献你的领域技能
+- 🎓 **贡献 Skill**：在 `.axon/skills/` 下贡献你的领域技能
 
 ### 开发规范
 
@@ -269,7 +269,7 @@ partner_list     → 查看所有队友
 partner_remove   → 移除队友
 ```
 
-队友作为独立子进程运行，配置持久化在 `.agents/teams/team.json`。
+队友作为独立子进程运行，配置持久化在 `.axon/teams/team.json`。
 
 ### ⏳ 后台任务
 

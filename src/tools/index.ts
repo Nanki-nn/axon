@@ -22,6 +22,13 @@ import {
   backgroundRun,
   checkBackground,
 } from "./background";
+import {
+  MEMORY_SAVE_DEFINITION,
+  MEMORY_LIST_DEFINITION,
+  MEMORY_READ_DEFINITION,
+  MEMORY_DELETE_DEFINITION,
+  memoryToolHandlers,
+} from "../features/memory";
 
 /**
  * 工具注册中心，管理所有可用工具的定义和调用分发。
@@ -141,6 +148,10 @@ export function getDEFINITIONS(): object[] {
     TASK_DEFINITION,
     SKILL_LIST_DEFINITION,
     SKILL_READ_DEFINITION,
+    MEMORY_SAVE_DEFINITION,
+    MEMORY_LIST_DEFINITION,
+    MEMORY_READ_DEFINITION,
+    MEMORY_DELETE_DEFINITION,
     PARTNER_CREATE_DEFINITION,
     PARTNER_LIST_DEFINITION,
     PARTNER_REMOVE_DEFINITION,
@@ -191,6 +202,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
   background_run:  (i) => { const taskId = backgroundRun(i.command); return JSON.stringify({ taskId, status: "running", note: "使用 check_background 查询结果" }); },
   check_background: (i) => checkBackground(i.taskId),
+  ...memoryToolHandlers,
   ...teamToolHandlers,
 };
 

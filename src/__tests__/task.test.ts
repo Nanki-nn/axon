@@ -2,14 +2,16 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { TaskManager } from "../task";
+import { getTasksDir } from "../project-paths";
 
-const TASKS_DIR = path.join(process.cwd(), ".tasks");
+const TASKS_DIR = path.join(process.cwd(), ".tmp", "tasks-test");
 
 describe("TaskManager", () => {
   let tm: TaskManager;
 
   beforeAll(() => {
-    // 清空 .tasks 测试前状态
+    process.env.AXON_TASKS_DIR = TASKS_DIR;
+    // 清空测试前状态
     if (fs.existsSync(TASKS_DIR)) {
       for (const f of fs.readdirSync(TASKS_DIR)) {
         fs.unlinkSync(path.join(TASKS_DIR, f));
@@ -26,6 +28,7 @@ describe("TaskManager", () => {
       }
       fs.rmdirSync(TASKS_DIR);
     }
+    delete process.env.AXON_TASKS_DIR;
   });
 
   it("创建任务并持久化到磁盘", () => {
@@ -35,7 +38,7 @@ describe("TaskManager", () => {
     expect(t.status).toBe("pending");
 
     // 验证磁盘文件
-    const filePath = path.join(TASKS_DIR, "task_1.json");
+    const filePath = path.join(getTasksDir(), "task_1.json");
     expect(fs.existsSync(filePath)).toBe(true);
     const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     expect(data.text).toBe("测试任务");
@@ -74,7 +77,7 @@ describe("TaskManager", () => {
 
   it("删除任务", () => {
     const t = tm.create("将被删除");
-    const filePath = path.join(TASKS_DIR, `task_${t.id}.json`);
+    const filePath = path.join(getTasksDir(), `task_${t.id}.json`);
     expect(fs.existsSync(filePath)).toBe(true);
     tm.delete(t.id);
     expect(fs.existsSync(filePath)).toBe(false);

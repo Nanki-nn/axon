@@ -15,10 +15,10 @@ interface Skill {
 }
 
 /**
- * SkillLoader：从 .agents/skills/ 目录加载所有技能。
+ * SkillLoader：从 .axon/skills/ 目录加载所有技能（兼容旧 .agents/skills）。
  *
  * 目录结构：
- *   .agents/skills/
+ *   .axon/skills/
  *     <skill-name>/
  *       SKILL.md          ← frontmatter (name, description) + 指令正文
  *       references/       ← 可选，存放参考文档或示例文件
@@ -28,20 +28,26 @@ interface Skill {
 export class SkillLoader {
   private skills: Map<string, Skill> = new Map();
 
-  constructor(skillsDir: string) {
-    if (!fs.existsSync(skillsDir)) return;
+  constructor(skillsDirs: string | string[]) {
+    const dirs = Array.isArray(skillsDirs) ? skillsDirs : [skillsDirs];
 
-    for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const skillDir = path.join(skillsDir, entry.name);
-      const skillFile = path.join(skillDir, "SKILL.md");
-      if (!fs.existsSync(skillFile)) continue;
+    for (const skillsDir of dirs) {
+      if (!fs.existsSync(skillsDir)) continue;
 
-      const text = fs.readFileSync(skillFile, "utf-8");
-      const { meta, body } = parseFrontmatter(text);
-      // frontmatter 中没有 name 时，用目录名作为 fallback
-      const name = meta.name || entry.name;
-      this.skills.set(name, { meta: { name, description: "", ...meta }, body, dir: skillDir });
+      for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const skillDir = path.join(skillsDir, entry.name);
+        const skillFile = path.join(skillDir, "SKILL.md");
+        if (!fs.existsSync(skillFile)) continue;
+
+        const text = fs.readFileSync(skillFile, "utf-8");
+        const { meta, body } = parseFrontmatter(text);
+        // frontmatter 中没有 name 时，用目录名作为 fallback
+        const name = meta.name || entry.name;
+        if (!this.skills.has(name)) {
+          this.skills.set(name, { meta: { name, description: "", ...meta }, body, dir: skillDir });
+        }
+      }
     }
   }
 

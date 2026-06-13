@@ -21,11 +21,16 @@ import { createClient, parseModelFlag, ProviderConfig } from "./providers";
 import { printLogo } from "./logo";
 import { createAnthropicAdapter } from "./providers/anthropic";
 import { logger, configureLogger, LogLevel } from "./logger";
+import {
+  getProjectConfigCandidates,
+  getProjectConfigPath,
+  getSkillsDirs,
+} from "./project-paths";
 
 // 加载 .env 文件中的环境变量（如 DEEPSEEK_API_KEY）
 config();
 
-// ── axon.config.json 配置文件结构 ─────────────────────────────────────────────
+// ── .axon/config.json 配置文件结构 ─────────────────────────────────────────────
 
 interface AxonConfig {
   provider?: string;                         // 提供商名称（deepseek/openai/anthropic 等）
@@ -46,12 +51,13 @@ function readConfig(filePath: string): AxonConfig {
 }
 
 /**
- * 合并全局配置（~/.axon/config.json）和项目配置（./axon.config.json）。
+ * 合并全局配置（~/.axon/config.json）和项目配置（./.axon/config.json）。
  * 项目配置优先级更高，mcpServers 和 plugins 做深度合并（不覆盖，而是追加）。
  */
 function loadAxonConfig(): AxonConfig {
   const globalConfig = readConfig(path.join(os.homedir(), ".axon", "config.json"));
-  const localConfig = readConfig(path.join(process.cwd(), "axon.config.json"));
+  const localConfigPath = getProjectConfigCandidates().find((filePath) => fs.existsSync(filePath));
+  const localConfig = localConfigPath ? readConfig(localConfigPath) : {};
   return {
     ...globalConfig,
     ...localConfig, // 局部配置覆盖全局配置
@@ -85,7 +91,7 @@ function getApiKey(provider: string, configKey?: string): string {
   const key = process.env[envVar]?.trim();
   if (!key) {
     console.error(chalk.red(`API key not set for provider '${provider}'.`));
-    console.error(`Set ${envVar} or add apiKey to axon.config.json.`);
+    console.error(`Set ${envVar} or add apiKey to ${getProjectConfigPath()}.`);
     process.exit(1);
   }
   return key;
@@ -185,15 +191,14 @@ program
       client = created.client;
     }
 
-    // 加载技能（.agents/skills/ 目录下的所有子目录）
-    const skillsDir = path.join(process.cwd(), ".agents", "skills");
-    const loader = new SkillLoader(skillsDir);
+    // 加载技能（优先 .axon/skills，兼容旧 .agents/skills）
+    const loader = new SkillLoader(getSkillsDirs());
     setSkillLoader(loader);
 
     // 加载项目上下文（从 git 根目录向 cwd 逐层查找 AGENTS.md）
     const agentsContext = loadAgentsContext();
 
-    // 加载长期记忆（~/.axon/memory/memory.md，由 Dream 整合生成）
+    // 加载长期记忆（.axon/memory/dream/memory.md，由 Dream 整合生成）
     const memoryContext = loadMemoryContext();
 
     // 初始化 Hook 系统，注册内置插件
@@ -201,7 +206,7 @@ program
     hooks.register(new SessionCounterPlugin()); // 会话计数
     hooks.register(new AutoDreamPlugin(client, model)); // 自动 Dream 整合
 
-    // 加载用户自定义插件（来自 axon.config.json 的 plugins 字段）
+    // 加载用户自定义插件（来自 .axon/config.json 的 plugins 字段）
     if (axonConfig.plugins) {
       for (const pluginPath of axonConfig.plugins) {
         try {

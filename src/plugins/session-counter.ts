@@ -1,11 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { AxonPlugin } from "../hooks";
+import { getDreamMemoryDir } from "../project-paths";
 
-// 元数据文件路径（~/.axon/memory/.meta.json）
+// 元数据文件路径（./.axon/memory/dream/.meta.json）
 // 存储跨会话的统计信息：会话总数、上次 Dream 时间戳
-const META_DIR = path.join(os.homedir(), ".axon", "memory");
+const META_DIR = getDreamMemoryDir();
 const META_FILE = path.join(META_DIR, ".meta.json");
 
 interface Meta {

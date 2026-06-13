@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
+import { getTeamsDir as getDefaultTeamsDir } from "../../project-paths";
 import { TeammateConfig } from "./types";
 
-const DEFAULT_TEAMS_DIR = join(process.cwd(), ".agents", "teams");
+const DEFAULT_TEAMS_DIR = getDefaultTeamsDir();
 
 export const TEAMS_DIR = DEFAULT_TEAMS_DIR;
 export const INBOXES_DIR = join(DEFAULT_TEAMS_DIR, "inboxes");
