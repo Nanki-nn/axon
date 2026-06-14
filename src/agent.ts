@@ -68,6 +68,36 @@ function buildPermissionPromptSection(): string {
 // 工具调用的内部类型：id 是 OpenAI 分配的唯一标识，arguments 是 JSON 字符串
 type ToolCall = { id: string; name: string; arguments: string };
 
+type ContinueReason =
+  | "next_turn"
+  | "manual_compact_retry"
+  | "prompt_too_long_compact_retry"
+  | "max_output_tokens_recovery"
+  | "background_result_continuation";
+
+interface LoopMetrics {
+  apiCalls: number;
+  toolRounds: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  lastInputTokens: number;
+  lastOutputTokens: number;
+  compactRetries: number;
+  maxOutputRecoveries: number;
+  continueReasons: Record<string, number>;
+}
+
+interface ApiResult {
+  content: string;
+  toolCalls: ToolCall[];
+  finishReason: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
 /**
  * Session 是一次完整的 Agent 会话。
  * 它维护对话历史（messages[]）、持有 LLM 客户端，并驱动"LLM → 工具 → LLM"的循环。
@@ -81,6 +111,18 @@ export class Session {
   private hooks: HookSystem;
   /** 连续未调用 todo 工具的轮数，达到阈值时注入 reminder */
   private roundsSinceTodo = 0;
+  private abortController: AbortController | null = null;
+  private metrics: LoopMetrics = {
+    apiCalls: 0,
+    toolRounds: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    lastInputTokens: 0,
+    lastOutputTokens: 0,
+    compactRetries: 0,
+    maxOutputRecoveries: 0,
+    continueReasons: {},
+  };
   /** 本会话已注入过的结构化记忆，避免重复刷屏 */
   private alreadySurfacedMemories = new Set<string>();
   /** 本会话累计注入的结构化记忆字节数，避免撑爆上下文 */
@@ -143,11 +185,27 @@ export class Session {
    * 发送一条用户消息，驱动一轮完整的 Agent 循环，直到 LLM 不再调用工具为止。
    */
   async chat(userMessage: string): Promise<void> {
+    this.abortController = new AbortController();
     this.messages.push({ role: "user", content: userMessage });
-    await this.injectRelevantMemories(userMessage);
-    await this.runLoop();
-    // 本轮结束，触发插件钩子（如记录会话日志）
-    await this.hooks.emit("onTurnEnd", { messages: this.messages });
+    try {
+      await this.injectRelevantMemories(userMessage);
+      await this.runQueryLoop();
+      // 本轮结束，触发插件钩子（如记录会话日志）
+      await this.hooks.emit("onTurnEnd", { messages: this.messages });
+    } finally {
+      this.abortController = null;
+    }
+  }
+
+  abort(): void {
+    this.abortController?.abort();
+  }
+
+  getMetrics(): LoopMetrics {
+    return {
+      ...this.metrics,
+      continueReasons: { ...this.metrics.continueReasons },
+    };
   }
 
   /** 会话结束时调用，触发 onSessionEnd 钩子（如 Auto-Dream 整合记忆） */
@@ -226,8 +284,38 @@ export class Session {
     fs.appendFileSync(logPath, lines.join("\n") + "\n");
   }
 
-  private async runLoop(): Promise<void> {
+  private noteContinue(reason: ContinueReason): void {
+    this.metrics.continueReasons[reason] = (this.metrics.continueReasons[reason] ?? 0) + 1;
+    logger.info("agent", `continue: ${reason}`);
+  }
+
+  private updateUsage(usage: ApiResult["usage"]): void {
+    if (!usage) return;
+    const input = usage.prompt_tokens ?? 0;
+    const output = usage.completion_tokens ?? 0;
+    this.metrics.lastInputTokens = input;
+    this.metrics.lastOutputTokens = output;
+    this.metrics.totalInputTokens += input;
+    this.metrics.totalOutputTokens += output;
+  }
+
+  private shouldRecoverMaxOutput(finishReason: string, toolCalls: ToolCall[], recoveries: number): boolean {
+    return finishReason === "length" && toolCalls.length === 0 && recoveries < 3;
+  }
+
+  private assertNotAborted(): boolean {
+    return this.abortController?.signal.aborted === true;
+  }
+
+  private async runQueryLoop(): Promise<void> {
+    let maxOutputRecoveriesThisTurn = 0;
+
     while (true) {
+      if (this.assertNotAborted()) {
+        logger.info("agent", "aborted before loop iteration");
+        break;
+      }
+
       this.debugMessages("runLoop 顶部");
 
       // ── 1a. L1: micro_compact（每轮静默，替换早期工具结果为占位符） ──
@@ -243,16 +331,23 @@ export class Session {
       // ── 1c. 检查后台任务完成状态，注入到消息中 ──
       const completedSummaries = getCompletedTasksSummaries();
       if (completedSummaries.length > 0) {
+        this.noteContinue("background_result_continuation");
         const bgContent = completedSummaries.join("\n\n");
         console.log(chalk.dim(`[后台任务完成: ${completedSummaries.length} 个]`));
         this.messages.push({ role: "user", content: `<background-results>\n${bgContent}\n</background-results>` });
       }
 
-      let result: Awaited<ReturnType<typeof this.callApi>>;
+      let result: ApiResult;
       try {
         // ── 2. 调用 LLM ──
         result = await this.callApi();
+        this.metrics.apiCalls++;
+        this.updateUsage(result.usage);
       } catch (err: any) {
+        if (this.assertNotAborted()) {
+          logger.info("agent", "aborted during API call");
+          break;
+        }
         // API 返回 prompt_too_long 时，紧急压缩后重试一次
         const isOverLimit =
           err?.message?.toLowerCase().includes("prompt_too_long") ||
@@ -260,6 +355,8 @@ export class Session {
 
         if (isOverLimit) {
           logger.warn("agent", "token 超限，紧急压缩");
+          this.metrics.compactRetries++;
+          this.noteContinue("prompt_too_long_compact_retry");
           this.messages = await compactHistory(this.messages, this.client, this.model);
           continue;
         }
@@ -284,8 +381,21 @@ export class Session {
         this.messages.push({ role: "assistant", content });
       }
 
+      if (this.shouldRecoverMaxOutput(finishReason, toolCalls, maxOutputRecoveriesThisTurn)) {
+        maxOutputRecoveriesThisTurn++;
+        this.metrics.maxOutputRecoveries++;
+        this.noteContinue("max_output_tokens_recovery");
+        this.messages.push({
+          role: "user",
+          content: "<continuation-request>Your previous response was cut off by the model output limit. Continue from exactly where you stopped. Do not repeat completed text unless needed for coherence.</continuation-request>",
+        });
+        continue;
+      }
+
       // LLM 不再要求调用工具，循环结束
       if (finishReason !== "tool_calls") break;
+      this.noteContinue("next_turn");
+      this.metrics.toolRounds++;
 
       // ── 4. 执行工具 ──
 
@@ -293,6 +403,7 @@ export class Session {
       const compactCall = toolCalls.find(tc => tc.name === "compact");
       if (compactCall) {
         logger.info("agent", "manual compact 触发");
+        this.noteContinue("manual_compact_retry");
         this.messages.push({
           role: "tool",
           tool_call_id: compactCall.id,
@@ -320,6 +431,10 @@ export class Session {
         parsedToolCalls.every((tc) => isToolConcurrencySafe(tc.name, tc.input));
 
       const runToolCall = async (tc: ToolCall & { input: Record<string, unknown> }) => {
+        if (this.assertNotAborted()) {
+          return { role: "tool" as const, tool_call_id: tc.id, content: "Aborted." };
+        }
+
         console.log(chalk.dim(`  input: ${tc.arguments}`));
 
         await this.hooks.emit("onBeforeToolCall", { name: tc.name, input: tc.input });
@@ -338,6 +453,7 @@ export class Session {
         toolResults.push(...await Promise.all(parsedToolCalls.map(runToolCall)));
       } else {
         for (const tc of parsedToolCalls) {
+          if (this.assertNotAborted()) break;
           toolResults.push(await runToolCall(tc));
         }
       }
@@ -362,6 +478,7 @@ export class Session {
     content: string;
     toolCalls: ToolCall[];
     finishReason: string;
+    usage?: ApiResult["usage"];
   }> {
     const stream = await this.client.chat.completions.create({
       model: this.model,
@@ -371,14 +488,20 @@ export class Session {
       ],
       tools: DEFINITIONS as OpenAI.Chat.ChatCompletionTool[],
       stream: true,
-    });
+      stream_options: { include_usage: true },
+    }, this.abortController ? { signal: this.abortController.signal } : undefined);
 
     let content = "";
     let finishReason = "stop";
+    let usage: ApiResult["usage"] | undefined;
     // 用 index 作为 key 拼接工具调用参数（OpenAI 流式接口按 index 分片传输）
     const toolCallMap: Record<number, ToolCall> = {};
 
     for await (const chunk of stream) {
+      if (this.assertNotAborted()) break;
+      if (chunk.usage) {
+        usage = chunk.usage;
+      }
       const choice = chunk.choices[0];
       if (!choice) continue;
 
@@ -409,6 +532,6 @@ export class Session {
     }
 
     process.stdout.write("\n");
-    return { content, toolCalls: Object.values(toolCallMap), finishReason };
+    return { content, toolCalls: Object.values(toolCallMap), finishReason, usage };
   }
 }
