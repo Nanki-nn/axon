@@ -1,4 +1,5 @@
 import { DEFINITION as BASH_DEF, execute as bashExecute } from "./bash";
+import { confirm } from "./bash";
 import {
   READ_DEFINITION, WRITE_DEFINITION, EDIT_DEFINITION, LIST_DEFINITION, SEARCH_DEFINITION,
   readFile, writeFile, editFile, listFiles, searchFiles,
@@ -29,6 +30,7 @@ import {
   MEMORY_DELETE_DEFINITION,
   memoryToolHandlers,
 } from "../features/memory";
+import { auditToolCall, checkPermission, maskSecrets } from "../permissions";
 
 /**
  * 工具注册中心，管理所有可用工具的定义和调用分发。
@@ -211,9 +213,30 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
  * MCP 工具优先（动态注册），其次是内置工具。
  */
 export async function dispatch(name: string, input: ToolInput): Promise<string> {
-  if (mcpDispatchers.has(name)) {
-    return mcpDispatchers.get(name)!(input);
+  const decision = checkPermission(name, input);
+  if (decision.action === "deny") {
+    const output = `Permission denied: ${decision.message ?? name}`;
+    auditToolCall({ toolName: name, input, decision, output });
+    return output;
   }
-  const handler = TOOL_HANDLERS[name];
-  return handler ? handler(input) : `Error: unknown tool '${name}'`;
+  if (decision.action === "confirm") {
+    const ok = await confirm(`⚠ 需要确认：${decision.message}`);
+    if (!ok) {
+      const output = "用户取消了执行。";
+      auditToolCall({ toolName: name, input, decision, output });
+      return output;
+    }
+  }
+
+  let output: string;
+  if (mcpDispatchers.has(name)) {
+    output = await mcpDispatchers.get(name)!(input);
+  } else {
+    const handler = TOOL_HANDLERS[name];
+    output = handler ? await handler(input) : `Error: unknown tool '${name}'`;
+  }
+
+  output = maskSecrets(output);
+  auditToolCall({ toolName: name, input, decision, output });
+  return output;
 }

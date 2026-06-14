@@ -140,11 +140,22 @@ program
   .argument("[prompt]", "Prompt to send (omit for interactive REPL)")
   .option("-m, --model <model>", "Model to use (e.g. deepseek-chat or anthropic:claude-3-5-sonnet)", DEFAULT_MODEL)
   .option("--yolo", "Skip all confirmations, execute directly")
-  .option("--plan", "Show tool plan before each execution round, wait for user confirmation")
+  .option("--plan", "Read-only planning mode; blocks writes and shell commands")
+  .option("--accept-edits", "Auto-approve file edits, still confirm dangerous shell commands")
+  .option("--dont-ask", "Auto-deny any operation that would require confirmation")
   .option("--log-level <level>", "Log level: debug|info|warn|error|silent", "info")
   .option("--log-file <file>", "Log output file path")
   .option("--teammate <name>", "Run as a teammate agent (used by spawnTeammate)")
-  .action(async (prompt: string | undefined, options: { model: string; yolo?: boolean; plan?: boolean; logLevel?: string; logFile?: string; teammate?: string }) => {
+  .action(async (prompt: string | undefined, options: {
+    model: string;
+    yolo?: boolean;
+    plan?: boolean;
+    acceptEdits?: boolean;
+    dontAsk?: boolean;
+    logLevel?: string;
+    logFile?: string;
+    teammate?: string;
+  }) => {
     // 配置日志系统
     const levelMap: Record<string, LogLevel> = {
       debug: LogLevel.DEBUG, info: LogLevel.INFO, warn: LogLevel.WARN,
@@ -161,7 +172,13 @@ program
       console.log(chalk.red("⚡ YOLO 模式：跳过所有确认"));
     } else if (options.plan) {
       setMode("plan");
-      console.log(chalk.yellow("📋 Plan 模式：执行前需确认"));
+      console.log(chalk.yellow("📋 Plan 模式：只读规划，阻止写入和 shell"));
+    } else if (options.acceptEdits) {
+      setMode("accept-edits");
+      console.log(chalk.yellow("✏️  Accept Edits 模式：自动允许文件编辑，仍确认危险 shell"));
+    } else if (options.dontAsk) {
+      setMode("dont-ask");
+      console.log(chalk.yellow("🚫 Dont Ask 模式：需要确认的操作将自动拒绝"));
     }
 
     // 加载配置文件（全局 + 项目级合并）

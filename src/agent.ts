@@ -3,7 +3,6 @@ import chalk from "chalk";
 import * as fs from "fs";
 import * as path from "path";
 import { DEFINITIONS, dispatch, setTaskRunner, getDEFINITIONS } from "./tools";
-import { confirm } from "./tools/bash";
 import { getMode } from "./mode";
 import {
   microCompact, compactHistory,
@@ -41,6 +40,30 @@ For any task with 3 or more steps:
 - Before each step: mark it in_progress (only one at a time)
 - After each step: mark it completed
 Use \`blockedBy\` to set up dependencies between tasks (DAG).`;
+
+function buildPermissionPromptSection(): string {
+  const mode = getMode();
+  const lines = [
+    "## 权限与安全",
+    `当前权限模式：${mode}`,
+    "- 工具调用会经过统一权限检查；被拒绝或被用户取消时，不要重复提交完全相同的工具调用。",
+    "- 危险 shell、后台命令、写入新文件和高风险操作可能需要用户确认。",
+    "- 已有文件在写入或编辑前必须先读取；如果文件在读取后被外部修改，需要重新读取。",
+    "- 不要把 API key、token、私钥等敏感信息写入日志、记忆或普通输出。",
+  ];
+
+  if (mode === "plan") {
+    lines.push("- Plan 模式是只读模式：只能读取、列举、搜索和规划；不要尝试写文件或执行 shell。");
+  } else if (mode === "accept-edits") {
+    lines.push("- Accept Edits 模式会自动允许文件编辑，但危险 shell 仍需要确认。");
+  } else if (mode === "dont-ask") {
+    lines.push("- Dont Ask 模式不会弹出确认；任何需要确认的操作都会被自动拒绝。");
+  } else if (mode === "yolo") {
+    lines.push("- YOLO 模式会跳过确认，但仍应主动避免不可逆和超出用户请求范围的操作。");
+  }
+
+  return lines.join("\n");
+}
 
 // 工具调用的内部类型：id 是 OpenAI 分配的唯一标识，arguments 是 JSON 字符串
 type ToolCall = { id: string; name: string; arguments: string };
@@ -88,6 +111,7 @@ export class Session {
 
     // 动态拼接系统提示：基础 + 长期记忆 + 项目上下文 + 技能列表
     let prompt = BASE_SYSTEM_PROMPT;
+    prompt += `\n\n${buildPermissionPromptSection()}`;
     if (memoryContext) {
       prompt += `\n\n## 长期记忆\n${memoryContext}`;
     }
@@ -257,24 +281,6 @@ export class Session {
 
       // LLM 不再要求调用工具，循环结束
       if (finishReason !== "tool_calls") break;
-
-      // ── Plan 模式：用户确认 ──
-      if (getMode() === "plan") {
-        console.log(chalk.yellow("\n📋 执行计划："));
-        toolCalls.forEach((tc, i) => {
-          let input: Record<string, unknown> = {};
-          try { input = JSON.parse(tc.arguments); } catch { /* ignore */ }
-          console.log(chalk.yellow(`  ${i + 1}. ${tc.name}`) + chalk.dim(`(${JSON.stringify(input)})`));
-        });
-
-        const ok = await confirm(chalk.yellow("\n确认执行以上操作？"));
-        if (!ok) {
-          for (const tc of toolCalls) {
-            this.messages.push({ role: "tool", tool_call_id: tc.id, content: "用户取消了执行。" });
-          }
-          break;
-        }
-      }
 
       // ── 4. 执行工具 ──
 

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { spawnSync } from "child_process";
 import { globSync } from "glob";
@@ -9,6 +9,7 @@ import { globSync } from "glob";
  */
 
 const WORKDIR = process.cwd();
+const readFileState = new Map<string, number>();
 
 function safePath(p: string): string {
   const abs = resolve(WORKDIR, p);
@@ -16,6 +17,28 @@ function safePath(p: string): string {
     throw new Error(`Path escapes workspace: ${p}`);
   }
   return abs;
+}
+
+function rememberRead(abs: string): void {
+  try {
+    readFileState.set(abs, statSync(abs).mtimeMs);
+  } catch {
+    // 文件可能在读取后立即被删除，忽略即可。
+  }
+}
+
+function ensureFreshForWrite(abs: string, displayPath: string, action: "writing" | "editing"): string | null {
+  if (!existsSync(abs)) return null;
+  if (!readFileState.has(abs)) {
+    return `Error: You must read ${displayPath} before ${action}. Use read_file first to inspect current contents.`;
+  }
+
+  const currentMtime = statSync(abs).mtimeMs;
+  const lastReadMtime = readFileState.get(abs);
+  if (currentMtime !== lastReadMtime) {
+    return `Warning: ${displayPath} was modified externally since your last read. Read it again before ${action}.`;
+  }
+  return null;
 }
 
 // ── 工具定义（OpenAI function calling 格式，传给 LLM）─────────────────────────
@@ -116,6 +139,7 @@ export function readFile(path: string): string {
   try {
     const abs = safePath(path);
     const text = readFileSync(abs, "utf-8");
+    rememberRead(abs);
     return text.length > READ_LIMIT_BYTES ? text.slice(0, READ_LIMIT_BYTES) + "\n[truncated]" : text;
   } catch (err: any) {
     return `Error: ${err.message}`;
@@ -126,8 +150,12 @@ export function readFile(path: string): string {
 export function writeFile(path: string, content: string): string {
   try {
     const abs = safePath(path);
+    const freshnessError = ensureFreshForWrite(abs, path, "writing");
+    if (freshnessError) return freshnessError;
+
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, content, "utf-8");
+    rememberRead(abs);
     return `Written ${content.length} bytes to ${abs}`;
   } catch (err: any) {
     return `Error: ${err.message}`;
@@ -141,6 +169,9 @@ export function writeFile(path: string, content: string): string {
 export function editFile(path: string, oldString: string, newString: string): string {
   try {
     const abs = safePath(path);
+    const freshnessError = ensureFreshForWrite(abs, path, "editing");
+    if (freshnessError) return freshnessError;
+
     const original = readFileSync(abs, "utf-8");
     if (!original.includes(oldString)) {
       return `Error: old_string not found in ${path}`;
@@ -156,6 +187,7 @@ export function editFile(path: string, oldString: string, newString: string): st
       return `Error: old_string appears ${count} times in ${path}. Provide more surrounding context to make the match unique.`;
     }
     writeFileSync(abs, original.replace(oldString, newString), "utf-8");
+    rememberRead(abs);
     return `Edited ${abs}`;
   } catch (err: any) {
     return `Error: ${err.message}`;
@@ -186,4 +218,8 @@ export function searchFiles(pattern: string, searchPath: string = "."): string {
   if (result.error) return `Error: ${result.error.message}`;
   const output = (result.stdout ?? "").trim();
   return output || `No matches for: ${pattern}`;
+}
+
+export function resetFileReadState(): void {
+  readFileState.clear();
 }

@@ -48,7 +48,7 @@ axon 是单仓 TypeScript 项目，纯 Node 运行，零浏览器依赖：
 | Agent Loop | 模型如何在“思考 → 工具调用 → 观察结果 → 继续推理”之间循环 | `src/agent.ts` | 计划中 |
 | 任务规划 | 如何把多步骤任务拆解、跟踪状态，并在执行中持续更新进度 | `src/task.ts` `src/tools/todo.ts` | 计划中 |
 | 工具系统 | 工具 schema、注册、分发、结果回填和错误恢复如何设计 | `src/tools/` | 计划中 |
-| 权限与安全 | 命令确认、危险操作拦截、文件访问边界和执行风险如何控制 | `src/tools/bash.ts` `src/mode.ts` | 计划中 |
+| 权限与安全 | 命令确认、危险操作拦截、文件访问边界和执行风险如何控制 | `src/permissions.ts` | [设计文章](docs/permission-security-design.md) |
 | 记忆系统 | 长期记忆如何保存、索引、召回、注入，以及如何做离线评测 | `src/features/memory/` | [设计文章](docs/memory-system-design.md) |
 | 技能系统 | `SKILL.md` 如何实现渐进披露，让模型按需加载领域能力 | `src/skills.ts` | 计划中 |
 
@@ -231,6 +231,63 @@ module.exports = {
 ```
 
 配在 `.axon/config.json` 的 `plugins` 数组里。
+
+## 🔐 权限与安全
+
+axon 的工具调用会先经过统一权限层，再进入具体工具执行。默认策略是：只读工具直接允许，高风险 shell、后台命令、写入新文件、外部 MCP 工具需要确认；被拒绝或取消的工具调用会写入审计日志。
+
+### 权限模式
+
+| 模式 | 启动参数 | 行为 |
+|---|---|---|
+| default | 默认 | 只读工具直接执行，高风险操作需要确认 |
+| plan | `--plan` | 只读规划模式，阻止写入和 shell |
+| yolo | `--yolo` | 跳过确认，适合完全信任的本地环境 |
+| accept-edits | `--accept-edits` | 自动允许文件编辑，仍确认危险 shell |
+| dont-ask | `--dont-ask` | 非交互模式，需要确认的操作自动拒绝 |
+
+### Allow / Deny 规则
+
+可以在 `~/.axon/settings.json`、项目 `.axon/settings.json` 或 `.axon/config.json` 中配置权限规则。`deny` 优先级高于 `allow`。
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "bash(npm test*)",
+      "read_file"
+    ],
+    "deny": [
+      "bash(npm publish*)",
+      "bash(git push*)",
+      "write_file(.env*)"
+    ]
+  }
+}
+```
+
+规则格式：
+
+| 格式 | 含义 |
+|---|---|
+| `tool` | 匹配该工具的所有调用 |
+| `tool(value)` | 精确匹配工具输入中的 command / path / filename |
+| `tool(prefix*)` | 前缀匹配 |
+| `tool(*middle*)` | 通配匹配 |
+
+### 文件写入保护
+
+对已有文件执行 `write_file` 或 `edit_file` 前，必须先调用 `read_file`。axon 会记录读取时的 `mtime`，如果文件在读取后被外部修改，本次写入会被拒绝并要求重新读取。
+
+### 审计日志与 Secret Mask
+
+所有工具调用都会记录到：
+
+```text
+.axon/security/audit.log
+```
+
+日志会保存工具名、输入摘要、权限决策和输出预览。常见 API key、token、Bearer 凭证和私钥内容会被自动替换为 `[REDACTED]`。
 
 ### 📋 项目上下文
 
