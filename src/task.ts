@@ -21,6 +21,7 @@ export class TaskManager {
       fs.mkdirSync(this.tasksDir, { recursive: true });
     }
     this._loadAll();
+    this._printProgress();
   }
 
   /** 创建新任务 */
@@ -36,6 +37,7 @@ export class TaskManager {
     };
     this.tasks.set(id, task);
     this._save(task);
+    this._printProgress();
     return task;
   }
 
@@ -75,6 +77,7 @@ export class TaskManager {
       this._clearDependency(id);
     }
 
+    this._printProgress();
     return task;
   }
 
@@ -96,6 +99,7 @@ export class TaskManager {
         this._save(task);
       }
     }
+    this._printProgress();
     return existed;
   }
 
@@ -158,5 +162,33 @@ export class TaskManager {
         this._save(task);
       }
     }
+  }
+
+  /** 在终端打印任务进度概览 */
+  private _printProgress(): void {
+    const all = this.listAll();
+    if (all.length === 0) return;
+
+    const total = all.length;
+    const completed = all.filter((t) => t.status === "completed").length;
+    const inProgress = all.filter((t) => t.status === "in_progress").length;
+    const pending = all.filter((t) => t.status === "pending").length;
+
+    const barWidth = 20;
+    const filled = Math.round((completed / total) * barWidth);
+    const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+
+    const lines: string[] = [];
+    lines.push(`\n── Tasks ─────────────────────────────────`);
+    lines.push(` ${bar} ${completed}/${total} (${inProgress} in progress, ${pending} pending)`);
+
+    for (const t of all) {
+      const icon = t.status === "completed" ? "✅" : t.status === "in_progress" ? "▶️" : "⏳";
+      const deps = t.blockedBy.length > 0 ? ` [wait: #${t.blockedBy.join(", #")}]` : "";
+      lines.push(`  ${icon} #${t.id}: ${t.text}${deps}`);
+    }
+    lines.push(` ─────────────────────────────────────\n`);
+
+    console.log(lines.join("\n"));
   }
 }

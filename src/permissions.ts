@@ -12,6 +12,11 @@ export interface PermissionDecision {
   message?: string;
 }
 
+export interface ToolPermissionMetadata {
+  isReadOnly?: boolean;
+  isDestructive?: boolean;
+}
+
 interface ParsedRule {
   tool: string;
   pattern: string | null;
@@ -187,25 +192,33 @@ export function checkPermission(
   toolName: string,
   input: Record<string, any>,
   mode: Mode = getMode(),
+  metadata: ToolPermissionMetadata = {},
 ): PermissionDecision {
   const ruleResult = checkPermissionRules(toolName, input);
   if (ruleResult === "deny") return { action: "deny", message: `Denied by permission rule for ${toolName}` };
   if (ruleResult === "allow") return { action: "allow" };
 
   if (mode === "yolo") return { action: "allow" };
-  if (READ_TOOLS.has(toolName)) return { action: "allow" };
+  const isReadOnly = metadata.isReadOnly ?? READ_TOOLS.has(toolName);
+  const isEditLike = EDIT_TOOLS.has(toolName) || (!isReadOnly && toolName !== "bash" && toolName !== "background_run");
+  const isShellLike = SHELL_TOOLS.has(toolName);
 
   if (mode === "plan") {
-    if (EDIT_TOOLS.has(toolName)) return { action: "deny", message: `Blocked in plan mode: ${toolName}` };
-    if (SHELL_TOOLS.has(toolName)) return { action: "deny", message: `Shell command blocked in plan mode: ${toolName}` };
+    if (isShellLike) return { action: "deny", message: `Shell command blocked in plan mode: ${toolName}` };
+    if (isReadOnly) return { action: "allow" };
+    return { action: "deny", message: `Blocked in plan mode: ${toolName}` };
   }
 
-  if (mode === "accept-edits" && EDIT_TOOLS.has(toolName)) return { action: "allow" };
+  if (isReadOnly) return { action: "allow" };
+
+  if (mode === "accept-edits" && isEditLike && !metadata.isDestructive) return { action: "allow" };
 
   const command = String(input.command ?? "");
   let confirmMessage = "";
-  if (SHELL_TOOLS.has(toolName) && isDangerousCommand(command)) {
+  if (isShellLike && isDangerousCommand(command)) {
     confirmMessage = `${toolName}: ${command}`;
+  } else if (metadata.isDestructive) {
+    confirmMessage = `destructive tool: ${toolName}`;
   } else if (toolName.includes("__")) {
     confirmMessage = `external MCP tool: ${toolName}`;
   } else {

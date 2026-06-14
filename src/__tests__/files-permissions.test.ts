@@ -44,6 +44,19 @@ describe("file safety", () => {
 
     const result = editFile(filePath, "old", "new");
     expect(result).toContain("Edited");
+    expect(result).toContain("@@ -1,1 +1,1 @@");
     expect(readFileSync(filePath, "utf-8")).toBe("hello new");
+  });
+
+  it("编辑支持引号归一化并返回 diff", () => {
+    const filePath = join(TEST_DIR, "quotes.txt");
+    writeFileSync(filePath, "const msg = \"hello\";");
+    expect(readFile(filePath)).toBe("const msg = \"hello\";");
+
+    const result = editFile(filePath, "const msg = \u201chello\u201d;", "const msg = \"world\";");
+    expect(result).toContain("matched via quote normalization");
+    expect(result).toContain("- const msg = \"hello\";");
+    expect(result).toContain("+ const msg = \"world\";");
+    expect(readFileSync(filePath, "utf-8")).toBe("const msg = \"world\";");
   });
 });

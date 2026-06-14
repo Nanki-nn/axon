@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import chalk from "chalk";
 import * as fs from "fs";
 import * as path from "path";
-import { DEFINITIONS, dispatch, setTaskRunner, getDEFINITIONS } from "./tools";
+import { DEFINITIONS, dispatch, getDeferredToolSummary, isToolConcurrencySafe, setTaskRunner, getDEFINITIONS } from "./tools";
 import { getMode } from "./mode";
 import {
   microCompact, compactHistory,
@@ -123,6 +123,11 @@ export class Session {
       prompt += `\n\n## Skills\nUse \`skill_read\` to load a skill before tackling a matching task.\n\n${skillLoader.listSkills()}`;
     } else {
       prompt += `\n\n## Skills\nNo skills available.`;
+    }
+
+    const deferredToolSummary = getDeferredToolSummary();
+    if (deferredToolSummary) {
+      prompt += `\n\n${deferredToolSummary}`;
     }
 
     // 注入队友信息
@@ -298,32 +303,43 @@ export class Session {
         continue;
       }
 
-      // 依次执行每个工具调用，收集结果
-      let usedTodo = false;
+      // 执行工具调用，纯只读/并发安全批次可以并行执行
       const toolResults: OpenAI.Chat.ChatCompletionToolMessageParam[] = [];
-
-      for (const tc of toolCalls) {
-        console.log(chalk.dim(`  input: ${tc.arguments}`));
+      const parsedToolCalls = toolCalls.map((tc) => {
         let input: Record<string, unknown>;
         try {
           input = JSON.parse(tc.arguments);
         } catch {
           input = {};
         }
+        return { ...tc, input };
+      });
+      const taskToolNames = ["todo", "task_create", "task_update", "task_list", "task_delete"];
+      const usedTodo = parsedToolCalls.some((tc) => taskToolNames.includes(tc.name));
+      const canRunConcurrently = parsedToolCalls.length > 1 &&
+        parsedToolCalls.every((tc) => isToolConcurrencySafe(tc.name, tc.input));
 
-        await this.hooks.emit("onBeforeToolCall", { name: tc.name, input });
+      const runToolCall = async (tc: ToolCall & { input: Record<string, unknown> }) => {
+        console.log(chalk.dim(`  input: ${tc.arguments}`));
+
+        await this.hooks.emit("onBeforeToolCall", { name: tc.name, input: tc.input });
 
         //----工具调用分发器----
-        const output = await dispatch(tc.name, input);
-        await this.hooks.emit("onAfterToolCall", { name: tc.name, input, output });
-
-        const taskToolNames = ["todo", "task_create", "task_update", "task_list", "task_delete"];
-        if (taskToolNames.includes(tc.name)) usedTodo = true;
+        const output = await dispatch(tc.name, tc.input);
+        await this.hooks.emit("onAfterToolCall", { name: tc.name, input: tc.input, output });
 
         const preview = output.length > 500 ? output.slice(0, 500) + "…" : output;
         console.log(chalk.dim(preview));
 
-        toolResults.push({ role: "tool", tool_call_id: tc.id, content: output });
+        return { role: "tool" as const, tool_call_id: tc.id, content: output };
+      };
+
+      if (canRunConcurrently) {
+        toolResults.push(...await Promise.all(parsedToolCalls.map(runToolCall)));
+      } else {
+        for (const tc of parsedToolCalls) {
+          toolResults.push(await runToolCall(tc));
+        }
       }
 
       // 更新 nag 计数

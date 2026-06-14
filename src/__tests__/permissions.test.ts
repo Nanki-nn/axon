@@ -28,6 +28,7 @@ describe("permissions", () => {
     expect(checkPermission("read_file", { path: "README.md" }).action).toBe("allow");
     expect(checkPermission("write_file", { path: "tmp.txt" }).action).toBe("deny");
     expect(checkPermission("bash", { command: "npm test" }).action).toBe("deny");
+    expect(checkPermission("bash", { command: "ls" }, undefined, { isReadOnly: true }).action).toBe("deny");
   });
 
   it("dont-ask 模式自动拒绝需要确认的操作", () => {

@@ -37,7 +37,7 @@ axon 是单仓 TypeScript 项目，纯 Node 运行，零浏览器依赖：
 | **🎓 Skill 技能系统** | `SKILL.md + scripts/references/assets` 目录；元数据发现、`skill_list` / `skill_read` 渐进披露 | `skills.ts` `tools/index.ts` |
 | **🪝 Hook 生命周期** | 工具调用前后、LLM 采样后、压缩前后、单轮 / 会话结束等事件钩子 | `hooks.ts` `plugins/` |
 | **💾 长期记忆 & Auto-Dream** | 会话摘要落盘；满足条件后台触发 LLM 整合，注入下次会话 system prompt | `memory.ts` `plugins/auto-dream.ts` |
-| **📉 4 层上下文压缩** | L1 消息裁剪 → L2 工具结果占位符 → L3 大结果持久化 → L4 LLM 摘要 | `compaction.ts` |
+| **📉 3 层上下文压缩** | L1 消息裁剪 → L2 工具结果占位符 → L3 大结果持久化 | `compaction.ts` |
 
 ### 🧭 机制拆解文章
 
@@ -332,7 +332,7 @@ npm run build                    # 编译到 dist/
 src/
 ├── cli.ts          # 入口：参数解析、子系统初始化
 ├── agent.ts        # Session + agent loop + 流式输出
-├── compaction.ts   # 四层压缩流水线
+├── compaction.ts   # 三层压缩流水线
 ├── context.ts      # AGENTS.md 层级加载
 ├── mode.ts         # yolo / default / plan
 ├── skills.ts       # SkillLoader

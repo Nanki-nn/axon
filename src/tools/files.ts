@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from "fs";
-import { dirname, resolve } from "path";
+import { dirname, resolve, relative } from "path";
 import { spawnSync } from "child_process";
 import { globSync } from "glob";
 
@@ -146,6 +146,52 @@ export function readFile(path: string): string {
   }
 }
 
+function normalizeQuotes(value: string): string {
+  return value
+    .replace(/[\u2018\u2019\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u2033]/g, "\"");
+}
+
+function findActualString(fileContent: string, searchString: string): { actual: string; quoteNormalized: boolean } | null {
+  if (fileContent.includes(searchString)) return { actual: searchString, quoteNormalized: false };
+
+  const normalizedSearch = normalizeQuotes(searchString);
+  const normalizedFile = normalizeQuotes(fileContent);
+  const idx = normalizedFile.indexOf(normalizedSearch);
+  if (idx === -1) return null;
+
+  return {
+    actual: fileContent.slice(idx, idx + searchString.length),
+    quoteNormalized: true,
+  };
+}
+
+function countOccurrences(content: string, needle: string): number {
+  let count = 0;
+  let searchIdx = 0;
+  while ((searchIdx = content.indexOf(needle, searchIdx)) !== -1) {
+    count++;
+    searchIdx += needle.length;
+  }
+  return count;
+}
+
+function generateEditDiff(original: string, oldString: string, newString: string): string {
+  const start = original.indexOf(oldString);
+  if (start === -1) return "";
+
+  const startLine = original.slice(0, start).split("\n").length;
+  const oldLines = oldString.split("\n");
+  const newLines = newString.split("\n");
+  const removed = oldLines.map((line) => `- ${line}`).join("\n");
+  const added = newLines.map((line) => `+ ${line}`).join("\n");
+  return [
+    `@@ -${startLine},${oldLines.length} +${startLine},${newLines.length} @@`,
+    removed,
+    added,
+  ].join("\n");
+}
+
 /** 写入文件，自动创建父目录，返回写入字节数确认 */
 export function writeFile(path: string, content: string): string {
   try {
@@ -173,22 +219,20 @@ export function editFile(path: string, oldString: string, newString: string): st
     if (freshnessError) return freshnessError;
 
     const original = readFileSync(abs, "utf-8");
-    if (!original.includes(oldString)) {
+    const match = findActualString(original, oldString);
+    if (!match) {
       return `Error: old_string not found in ${path}`;
     }
     // 统计出现次数，超过 1 次时拒绝执行
-    let count = 0;
-    let searchIdx = 0;
-    while ((searchIdx = original.indexOf(oldString, searchIdx)) !== -1) {
-      count++;
-      searchIdx += oldString.length;
-    }
+    const count = countOccurrences(original, match.actual);
     if (count > 1) {
       return `Error: old_string appears ${count} times in ${path}. Provide more surrounding context to make the match unique.`;
     }
-    writeFileSync(abs, original.replace(oldString, newString), "utf-8");
+    writeFileSync(abs, original.replace(match.actual, newString), "utf-8");
     rememberRead(abs);
-    return `Edited ${abs}`;
+    const quoteNote = match.quoteNormalized ? " (matched via quote normalization)" : "";
+    const diff = generateEditDiff(original, match.actual, newString);
+    return `Edited ${relative(WORKDIR, abs) || abs}${quoteNote}\n\n${diff}`;
   } catch (err: any) {
     return `Error: ${err.message}`;
   }

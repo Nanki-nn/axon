@@ -1,5 +1,7 @@
 import { DEFINITION as BASH_DEF, execute as bashExecute } from "./bash";
 import { confirm } from "./bash";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import {
   READ_DEFINITION, WRITE_DEFINITION, EDIT_DEFINITION, LIST_DEFINITION, SEARCH_DEFINITION,
   readFile, writeFile, editFile, listFiles, searchFiles,
@@ -31,6 +33,7 @@ import {
   memoryToolHandlers,
 } from "../features/memory";
 import { auditToolCall, checkPermission, maskSecrets } from "../permissions";
+import { getProjectAxonDir } from "../project-paths";
 
 /**
  * 工具注册中心，管理所有可用工具的定义和调用分发。
@@ -52,6 +55,51 @@ export function setTaskRunner(fn: (prompt: string, description: string) => Promi
 const mcpDispatchers = new Map<string, (input: Record<string, string>) => Promise<string>>();
 // MCP 工具的 OpenAI function definition 列表（动态追加到 DEFINITIONS）
 const mcpDefinitions: object[] = [];
+
+type ToolInput = Record<string, any>;
+type ToolHandler = (input: ToolInput) => Promise<string> | string;
+
+export interface ToolSpec {
+  name: string;
+  definition: object;
+  handler?: ToolHandler;
+  maxResultSizeChars?: number;
+  deferred?: boolean;
+  prompt?: string;
+  isReadOnly?: (input: ToolInput) => boolean;
+  isConcurrencySafe?: (input: ToolInput) => boolean;
+  isDestructive?: (input: ToolInput) => boolean;
+}
+
+const DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000;
+const TOOL_RESULT_PERSIST_THRESHOLD_CHARS = 30_000;
+const activatedDeferredTools = new Set<string>();
+
+function functionName(definition: object): string {
+  const def = definition as { function?: { name?: string } };
+  return def.function?.name ?? "";
+}
+
+function spec(definition: object, handler: ToolHandler, options: Omit<ToolSpec, "name" | "definition" | "handler"> = {}): ToolSpec {
+  return {
+    name: functionName(definition),
+    definition,
+    handler,
+    maxResultSizeChars: DEFAULT_MAX_RESULT_SIZE_CHARS,
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    isDestructive: () => false,
+    ...options,
+  };
+}
+
+function readOnly(definition: object, handler: ToolHandler, options: Omit<ToolSpec, "name" | "definition" | "handler" | "isReadOnly" | "isConcurrencySafe"> = {}): ToolSpec {
+  return spec(definition, handler, {
+    ...options,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => true,
+  });
+}
 
 /** 注入技能加载器（仅在 cli.ts 启动阶段调用一次） */
 export function setSkillLoader(loader: SkillLoader): void {
@@ -123,46 +171,147 @@ const SKILL_READ_DEFINITION = {
   },
 };
 
-/**
- * 返回当前所有工具的定义列表（内置工具 + 动态注册的 MCP 工具）。
- * 每次调用都重新构建，确保 MCP 工具注册后能被包含进来。
- */
-export function getDEFINITIONS(): object[] {
-  return [
-    BASH_DEF,
-    READ_DEFINITION,
-    WRITE_DEFINITION,
-    EDIT_DEFINITION,
-    LIST_DEFINITION,
-    SEARCH_DEFINITION,
-    TODO_DEFINITION,
-    BACKGROUND_RUN_DEFINITION,
-    CHECK_BACKGROUND_DEFINITION,
-    ...taskTools.map((t) => ({
+const TOOL_SEARCH_DEFINITION = {
+  type: "function" as const,
+  function: {
+    name: "tool_search",
+    description:
+      "Search deferred tools by name or keyword and activate matching tool schemas for the next model call.",
+    parameters: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Tool name or keyword to search for" },
+      },
+      required: ["query"],
+    },
+  },
+};
+
+function createBuiltInToolSpecs(): ToolSpec[] {
+  const taskSpecs = taskTools.map((t) => {
+    const definition = {
       type: "function" as const,
       function: {
         name: t.name,
         description: t.description,
         parameters: t.inputSchema,
       },
-    })),
-    COMPACT_DEF,
-    TASK_DEFINITION,
-    SKILL_LIST_DEFINITION,
-    SKILL_READ_DEFINITION,
-    MEMORY_SAVE_DEFINITION,
-    MEMORY_LIST_DEFINITION,
-    MEMORY_READ_DEFINITION,
-    MEMORY_DELETE_DEFINITION,
-    PARTNER_CREATE_DEFINITION,
-    PARTNER_LIST_DEFINITION,
-    PARTNER_REMOVE_DEFINITION,
-    PARTNER_SEND_DEFINITION,
-    PARTNER_READ_INBOX_DEFINITION,
-    PARTNER_BROADCAST_DEFINITION,
-    PARTNER_SPAWN_DEFINITION,
-    ...mcpDefinitions,
+    };
+    const taskReadOnly = t.name === "task_list";
+    return spec(definition, (i) => t.handler(i), {
+      isReadOnly: () => taskReadOnly,
+      isConcurrencySafe: () => taskReadOnly,
+    });
+  });
+
+  return [
+    spec(BASH_DEF, (i) => bashExecute(i.command), {
+      isReadOnly: (i) => /^\s*(pwd|ls|find|rg|grep|cat|sed|head|tail|wc|git\s+(status|diff|show|log|branch))\b/.test(String(i.command ?? "")),
+    }),
+    readOnly(READ_DEFINITION, (i) => readFile(i.path)),
+    spec(WRITE_DEFINITION, (i) => writeFile(i.path, i.content)),
+    spec(EDIT_DEFINITION, (i) => editFile(i.path, i.old_string, i.new_string)),
+    readOnly(LIST_DEFINITION, (i) => listFiles(i.pattern)),
+    readOnly(SEARCH_DEFINITION, (i) => searchFiles(i.pattern, i.path ?? ".")),
+    spec(TODO_DEFINITION, (i) => {
+      try {
+        return TODO.update(i.items ?? []);
+      } catch (e: any) {
+        return `Error: ${e.message}`;
+      }
+    }, { deferred: true }),
+    spec(BACKGROUND_RUN_DEFINITION, (i) => {
+      const taskId = backgroundRun(i.command);
+      return JSON.stringify({ taskId, status: "running", note: "使用 check_background 查询结果" });
+    }),
+    readOnly(CHECK_BACKGROUND_DEFINITION, (i) => checkBackground(i.taskId)),
+    ...taskSpecs,
+    spec(COMPACT_DEF, () => compactExecute()),
+    spec(TASK_DEFINITION, (i) => taskRunner
+      ? taskRunner(i.prompt ?? "", i.description ?? "subtask")
+      : "Error: task runner not initialized", { deferred: true }),
+    readOnly(SKILL_LIST_DEFINITION, () => skillLoader?.listSkills() ?? "Error: skill system not initialized"),
+    readOnly(SKILL_READ_DEFINITION, (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized"),
+    spec(TOOL_SEARCH_DEFINITION, (i) => searchDeferredTools(String(i.query ?? "")), {
+      isReadOnly: () => true,
+      isConcurrencySafe: () => false,
+    }),
+    spec(MEMORY_SAVE_DEFINITION, memoryToolHandlers.memory_save, { deferred: true }),
+    readOnly(MEMORY_LIST_DEFINITION, memoryToolHandlers.memory_list, { deferred: true }),
+    readOnly(MEMORY_READ_DEFINITION, memoryToolHandlers.memory_read, { deferred: true }),
+    spec(MEMORY_DELETE_DEFINITION, memoryToolHandlers.memory_delete, { deferred: true, isDestructive: () => true }),
+    spec(PARTNER_CREATE_DEFINITION, teamToolHandlers.partner_create, { deferred: true }),
+    readOnly(PARTNER_LIST_DEFINITION, teamToolHandlers.partner_list, { deferred: true }),
+    spec(PARTNER_REMOVE_DEFINITION, teamToolHandlers.partner_remove, { deferred: true, isDestructive: () => true }),
+    spec(PARTNER_SEND_DEFINITION, teamToolHandlers.partner_send, { deferred: true }),
+    readOnly(PARTNER_READ_INBOX_DEFINITION, teamToolHandlers.partner_read_inbox, { deferred: true }),
+    spec(PARTNER_BROADCAST_DEFINITION, teamToolHandlers.partner_broadcast, { deferred: true }),
+    spec(PARTNER_SPAWN_DEFINITION, teamToolHandlers.partner_spawn, { deferred: true }),
   ];
+}
+
+function createMcpToolSpecs(): ToolSpec[] {
+  return mcpDefinitions.map((definition) => spec(definition, (input) => {
+    const name = functionName(definition);
+    const dispatcher = mcpDispatchers.get(name);
+    return dispatcher ? dispatcher(input) : `Error: unknown MCP tool '${name}'`;
+  }, {
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+  }));
+}
+
+function getAllToolSpecs(): ToolSpec[] {
+  return [...createBuiltInToolSpecs(), ...createMcpToolSpecs()];
+}
+
+function getActiveToolSpecs(): ToolSpec[] {
+  return getAllToolSpecs().filter((tool) => !tool.deferred || activatedDeferredTools.has(tool.name));
+}
+
+function getToolSpec(name: string): ToolSpec | undefined {
+  return getAllToolSpecs().find((tool) => tool.name === name);
+}
+
+function searchDeferredTools(query: string): string {
+  const normalized = query.trim().toLowerCase();
+  const deferred = getAllToolSpecs().filter((tool) => tool.deferred);
+  const matches = deferred.filter((tool) => {
+    const def = tool.definition as { function?: { description?: string } };
+    const haystack = `${tool.name} ${def.function?.description ?? ""}`.toLowerCase();
+    return !normalized || haystack.includes(normalized);
+  });
+
+  if (matches.length === 0) {
+    return "No matching deferred tools found.";
+  }
+
+  for (const tool of matches) activatedDeferredTools.add(tool.name);
+
+  return JSON.stringify(matches.map((tool) => tool.definition), null, 2);
+}
+
+export function getDeferredToolSummary(): string {
+  const deferred = getAllToolSpecs().filter((tool) => tool.deferred);
+  if (deferred.length === 0) return "";
+  const names = deferred.map((tool) => tool.name).sort().join(", ");
+  return [
+    "## Deferred tools",
+    "Some less common tools are hidden until needed to reduce tool schema tokens.",
+    `Use \`tool_search\` to activate matching tools. Available deferred tool names: ${names}.`,
+  ].join("\n");
+}
+
+export function resetDeferredToolActivations(): void {
+  activatedDeferredTools.clear();
+}
+
+/**
+ * 返回当前所有工具的定义列表（内置工具 + 动态注册的 MCP 工具）。
+ * 每次调用都重新构建，确保 MCP 工具注册后能被包含进来。
+ */
+export function getDEFINITIONS(): object[] {
+  return getActiveToolSpecs().map((tool) => tool.definition);
 }
 
 /**
@@ -180,40 +329,47 @@ export const DEFINITIONS = new Proxy([] as object[], {
   },
 });
 
-type ToolInput = Record<string, any>;
-type ToolHandler = (input: ToolInput) => Promise<string> | string;
+function persistLargeResult(toolName: string, output: string): string {
+  const dir = join(getProjectAxonDir(), "tool-results");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const filePath = join(dir, `${Date.now()}-${safeName}.txt`);
+  writeFileSync(filePath, output, "utf-8");
+  return filePath;
+}
 
-// 内置工具 dispatch map：工具名 → 处理函数
-const TOOL_HANDLERS: Record<string, ToolHandler> = {
-  bash:         (i) => bashExecute(i.command),
-  read_file:    (i) => readFile(i.path),
-  write_file:   (i) => writeFile(i.path, i.content),
-  edit_file:    (i) => editFile(i.path, i.old_string, i.new_string),
-  list_files:   (i) => listFiles(i.pattern),
-  search_files: (i) => searchFiles(i.pattern, i.path ?? "."),
-  todo:         (i) => { try { return TODO.update(i.items ?? []); } catch (e: any) { return `Error: ${e.message}`; } },
-  task_create:  (i) => taskTools[0].handler(i),
-  task_update:  (i) => taskTools[1].handler(i),
-  task_list:    (_) => taskTools[2].handler({}),
-  task_delete:  (i) => taskTools[3].handler(i),
-  compact:      (i) => compactExecute(),
-  task:         (i) => taskRunner
-    ? taskRunner(i.prompt ?? "", i.description ?? "subtask")
-    : "Error: task runner not initialized",
-  skill_list:   (_) => skillLoader?.listSkills() ?? "Error: skill system not initialized",
-  skill_read:   (i) => skillLoader?.getContent(i.name) ?? "Error: skill system not initialized",
-  background_run:  (i) => { const taskId = backgroundRun(i.command); return JSON.stringify({ taskId, status: "running", note: "使用 check_background 查询结果" }); },
-  check_background: (i) => checkBackground(i.taskId),
-  ...memoryToolHandlers,
-  ...teamToolHandlers,
-};
+function processToolResult(tool: ToolSpec | undefined, toolName: string, output: string): string {
+  const maxChars = tool?.maxResultSizeChars ?? DEFAULT_MAX_RESULT_SIZE_CHARS;
+  if (output.length <= maxChars) return output;
+
+  const filePath = output.length > TOOL_RESULT_PERSIST_THRESHOLD_CHARS
+    ? persistLargeResult(toolName, output)
+    : null;
+  const keepEach = Math.max(1000, Math.floor((maxChars - 160) / 2));
+  const truncated = [
+    output.slice(0, keepEach),
+    `[... truncated ${output.length - keepEach * 2} chars ...]`,
+    ...(filePath ? [`Full result saved to: ${filePath}`] : []),
+    output.slice(-keepEach),
+  ];
+  return truncated.join("\n\n");
+}
+
+export function isToolConcurrencySafe(name: string, input: ToolInput): boolean {
+  const tool = getToolSpec(name);
+  return tool?.isConcurrencySafe?.(input) ?? false;
+}
 
 /**
  * 工具调用分发器：根据工具名找到对应的执行函数并调用。
  * MCP 工具优先（动态注册），其次是内置工具。
  */
 export async function dispatch(name: string, input: ToolInput): Promise<string> {
-  const decision = checkPermission(name, input);
+  const tool = getToolSpec(name);
+  const decision = checkPermission(name, input, undefined, {
+    isReadOnly: tool?.isReadOnly?.(input) ?? false,
+    isDestructive: tool?.isDestructive?.(input) ?? false,
+  });
   if (decision.action === "deny") {
     const output = `Permission denied: ${decision.message ?? name}`;
     auditToolCall({ toolName: name, input, decision, output });
@@ -229,14 +385,10 @@ export async function dispatch(name: string, input: ToolInput): Promise<string> 
   }
 
   let output: string;
-  if (mcpDispatchers.has(name)) {
-    output = await mcpDispatchers.get(name)!(input);
-  } else {
-    const handler = TOOL_HANDLERS[name];
-    output = handler ? await handler(input) : `Error: unknown tool '${name}'`;
-  }
+  output = tool?.handler ? await tool.handler(input) : `Error: unknown tool '${name}'`;
 
   output = maskSecrets(output);
+  output = processToolResult(tool, name, output);
   auditToolCall({ toolName: name, input, decision, output });
   return output;
 }
