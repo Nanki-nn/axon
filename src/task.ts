@@ -164,7 +164,12 @@ export class TaskManager {
     }
   }
 
-  /** 在终端打印任务进度概览 */
+  /** 上一次打印的任务数，用于判断列表是否变化 */
+  private _lastTaskCount = 0;
+  /** 上一次打印的总行数（含实际行数），用于光标回退 */
+  private _lastPrintLines = 0;
+
+  /** 在终端打印任务进度概览 — 动态更新版 */
   private _printProgress(): void {
     const all = this.listAll();
     if (all.length === 0) return;
@@ -179,16 +184,34 @@ export class TaskManager {
     const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
 
     const lines: string[] = [];
-    lines.push(`\n── Tasks ─────────────────────────────────`);
-    lines.push(` ${bar} ${completed}/${total} (${inProgress} in progress, ${pending} pending)`);
+    lines.push(`── Tasks ─────────────────────────────────`);
+    const pct = Math.round((completed / total) * 100);
+    lines.push(` ${bar}  ${completed}/${total} (${pct}%)  ▶ ${inProgress}  ⏳ ${pending}`);
 
     for (const t of all) {
       const icon = t.status === "completed" ? "✅" : t.status === "in_progress" ? "▶️" : "⏳";
       const deps = t.blockedBy.length > 0 ? ` [wait: #${t.blockedBy.join(", #")}]` : "";
       lines.push(`  ${icon} #${t.id}: ${t.text}${deps}`);
     }
-    lines.push(` ─────────────────────────────────────\n`);
+    lines.push(` ─────────────────────────────────────`);
 
-    console.log(lines.join("\n"));
+    const output = lines.join("\n");
+    const currentLines = lines.length;
+
+    // 如果任务数没变（行数一致），回退覆盖更新；否则重新打印
+    if (this._lastTaskCount === total && this._lastPrintLines > 0) {
+      process.stdout.write(`\x1B[${this._lastPrintLines}A`);
+    }
+
+    process.stdout.write(output + "\n");
+    this._lastPrintLines = currentLines;
+    this._lastTaskCount = total;
+
+    // 全部完成时释放行定位，后续输出正常换行
+    if (completed === total) {
+      process.stdout.write("\n");
+      this._lastPrintLines = 0;
+      this._lastTaskCount = 0;
+    }
   }
 }
