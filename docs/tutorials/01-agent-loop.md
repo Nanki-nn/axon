@@ -388,34 +388,6 @@ python agent_loop.py
 
 ---
 
-## 附：系列架构总览
-
-这是整个系列 7 个模块的关系图。你现在看懂了左边的 "Agent Loop" 部分，后续文章会逐步展开其他模块。
-
-```mermaid
-flowchart TB
-    USER[用户输入] --> LOOP[Agent Loop<br>主循环]
-
-    LOOP --> TOOLS[工具系统<br>注册 · 校验 · 分发]
-    LOOP --> SKILLS[Skill 系统<br>专业能力注入]
-    LOOP --> MEM[记忆系统<br>结构化存储]
-
-    TOOLS --> PERM[权限/安全<br>检查 · 保护 · 确认]
-    TOOLS --> TASK[任务规划<br>DAG 依赖编排]
-
-    MEM --> COLLAB[多 Agent 协作<br>通信 · 分发 · 聚合]
-
-    style LOOP fill:#4A90D9,color:#fff
-    style TOOLS fill:#7B68EE,color:#fff
-    style PERM fill:#E74C3C,color:#fff
-    style TASK fill:#2ECC71,color:#fff
-    style SKILLS fill:#F39C12,color:#fff
-    style MEM fill:#1ABC9C,color:#fff
-    style COLLAB fill:#E91E63,color:#fff
-```
-
----
-
 **下一篇预告：** 让 Agent 有手有脚 —— 工具系统的设计与演化
 
 当 LLM 想调工具时，工具从哪来？参数怎么校验？结果怎么返回？下一篇从零搭建一个完整的工具系统。
