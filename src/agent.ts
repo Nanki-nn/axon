@@ -6,7 +6,7 @@ import { DEFINITIONS, dispatch, getDeferredToolSummary, isToolConcurrencySafe, s
 import { getMode } from "./mode";
 import {
   microCompact, compactHistory,
-  estimateSize, CONTEXT_LIMIT,
+  estimateSize, LIGHT_LIMIT, HEAVY_LIMIT,
 } from "./compaction";
 import { getCompletedTasksSummaries } from "./tools/background";
 import { getTeammatesSystemPrompt } from "./tools/teams";
@@ -358,13 +358,17 @@ export class Session {
 
       this.debugMessages("runLoop 顶部");
 
-      // ── 1a. L1: micro_compact（每轮静默，替换早期工具结果为占位符） ──
+      // ── 1. 双阈值压缩流水线 ──
+      //     LIGHT_LIMIT 以下: 不动
+      //     LIGHT_LIMIT ~ HEAVY_LIMIT: 仅 microCompact（去掉冗余 tool_result）
+      //     HEAVY_LIMIT 以上: + compactHistory（LLM 摘要）
       await this.hooks.emit("onBeforeCompact", { messages: this.messages });
-      this.messages = microCompact(this.messages);
-
-      // ── 1b. L2: auto_compact（体积超限时 LLM 摘要压缩） ──
-      if (estimateSize(this.messages) > CONTEXT_LIMIT) {
-        logger.info("agent", "auto compact 触发");
+      const size = estimateSize(this.messages);
+      if (size > LIGHT_LIMIT) {
+        this.messages = microCompact(this.messages);
+      }
+      if (size > HEAVY_LIMIT) {
+        logger.info("agent", `auto compact 触发 (${size} > ${HEAVY_LIMIT})`);
         this.messages = await compactHistory(this.messages, this.client, this.model);
       }
 
