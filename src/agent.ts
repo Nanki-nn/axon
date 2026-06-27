@@ -167,6 +167,7 @@ export class Session {
   private alreadySurfacedMemories = new Set<string>();
   /** 本会话累计注入的结构化记忆字节数，避免撑爆上下文 */
   private sessionMemoryBytes = 0;
+  private processing = false;
 
   constructor(
     apiKey: string,
@@ -226,6 +227,7 @@ export class Session {
    */
   async chat(userMessage: string): Promise<void> {
     this.abortController = new AbortController();
+    this.processing = true;
     this.messages.push({ role: "user", content: userMessage });
     try {
       await this.injectRelevantMemories(userMessage);
@@ -234,6 +236,7 @@ export class Session {
       await this.hooks.emit("onTurnEnd", { messages: this.messages });
     } finally {
       this.abortController = null;
+      this.processing = false;
     }
   }
 
@@ -246,6 +249,30 @@ export class Session {
       ...this.metrics,
       continueReasons: { ...this.metrics.continueReasons },
     };
+  }
+
+  isProcessing(): boolean {
+    return this.processing;
+  }
+
+  clearHistory(): void {
+    this.messages = [];
+    this.roundsSinceTodo = 0;
+    this.alreadySurfacedMemories.clear();
+    this.sessionMemoryBytes = 0;
+  }
+
+  async compactNow(): Promise<void> {
+    if (this.messages.length === 0) return;
+    this.messages = await compactHistory(this.messages, this.client, this.model);
+  }
+
+  exportMessages(): OpenAI.Chat.ChatCompletionMessageParam[] {
+    return JSON.parse(JSON.stringify(this.messages));
+  }
+
+  importMessages(messages: OpenAI.Chat.ChatCompletionMessageParam[]): void {
+    this.messages = JSON.parse(JSON.stringify(messages));
   }
 
   /** 会话结束时调用，触发 onSessionEnd 钩子（如 Auto-Dream 整合记忆） */

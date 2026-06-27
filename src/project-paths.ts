@@ -48,6 +48,10 @@ export function getTranscriptsDir(): string {
   return projectPath("transcripts");
 }
 
+export function getSessionsDir(): string {
+  return projectPath("sessions");
+}
+
 export function getDebugLogPath(): string {
   return projectPath("debug-messages.log");
 }

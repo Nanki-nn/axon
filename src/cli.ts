@@ -22,6 +22,13 @@ import { printLogo } from "./logo";
 import { createAnthropicAdapter } from "./providers/anthropic";
 import { logger, configureLogger, LogLevel } from "./logger";
 import {
+  appendSessionSnapshot,
+  createSessionId,
+  latestSessionId,
+  loadSessionMessages,
+  sessionPath,
+} from "./session-store";
+import {
   getProjectConfigCandidates,
   getProjectConfigPath,
   getSkillsDirs,
@@ -103,11 +110,56 @@ function getApiKey(provider: string, configKey?: string): string {
  * 启动交互式 REPL：循环读取用户输入，调用 session.chat()，直到用户退出。
  * 支持 Ctrl+C、exit、quit、q 等方式退出。
  */
-async function repl(session: Session): Promise<void> {
-  console.log(`${chalk.dim("Ctrl+C or type exit to quit")}\n`);
+function printReplHelp(): void {
+  console.log([
+    chalk.bold("Commands:"),
+    "  /help                  Show this help",
+    "  /clear                 Clear current conversation history",
+    "  /metrics               Show loop metrics",
+    "  /compact               Compact current conversation now",
+    "  /mode <name>           Set mode: default|plan|yolo|accept-edits|dont-ask",
+    "  exit | quit | q        Exit",
+  ].join("\n"));
+}
+
+function printMetrics(session: Session): void {
+  const metrics = session.getMetrics();
+  console.log(JSON.stringify(metrics, null, 2));
+}
+
+function setModeFromCommand(mode: string): boolean {
+  const allowed = new Set(["default", "plan", "yolo", "accept-edits", "dont-ask"]);
+  if (!allowed.has(mode)) return false;
+  setMode(mode as any);
+  return true;
+}
+
+async function repl(session: Session, sessionId: string): Promise<void> {
+  console.log(`${chalk.dim("Ctrl+C or type exit to quit. Type /help for commands.")}\n`);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const ask = () => new Promise<string>((resolve) => rl.question(chalk.green("> "), resolve));
+  let sigintCount = 0;
+
+  process.on("SIGINT", () => {
+    if (session.isProcessing()) {
+      session.abort();
+      console.log(chalk.yellow("\n(interrupted current task)"));
+      sigintCount = 0;
+      return;
+    }
+
+    sigintCount++;
+    if (sigintCount >= 2) {
+      rl.close();
+      process.exit(0);
+    }
+    console.log(chalk.dim("\nPress Ctrl+C again to exit."));
+    rl.prompt();
+  });
+
+  const ask = () => new Promise<string>((resolve) => {
+    rl.question(chalk.green("> "), resolve);
+  });
 
   while (true) {
     let input: string;
@@ -118,10 +170,42 @@ async function repl(session: Session): Promise<void> {
     }
 
     input = input.trim();
+    sigintCount = 0;
     if (!input) continue;
     if (["exit", "quit", "q"].includes(input)) break;
 
+    if (input === "/help") {
+      printReplHelp();
+      continue;
+    }
+    if (input === "/clear") {
+      session.clearHistory();
+      appendSessionSnapshot(sessionId, session.exportMessages());
+      console.log(chalk.dim("Conversation history cleared."));
+      continue;
+    }
+    if (input === "/metrics" || input === "/cost") {
+      printMetrics(session);
+      continue;
+    }
+    if (input === "/compact") {
+      await session.compactNow();
+      appendSessionSnapshot(sessionId, session.exportMessages());
+      console.log(chalk.dim("Conversation compacted."));
+      continue;
+    }
+    if (input.startsWith("/mode")) {
+      const mode = input.split(/\s+/)[1];
+      if (!mode || !setModeFromCommand(mode)) {
+        console.log(chalk.yellow("Usage: /mode default|plan|yolo|accept-edits|dont-ask"));
+      } else {
+        console.log(chalk.dim(`Mode set to ${mode}.`));
+      }
+      continue;
+    }
+
     await session.chat(input);
+    appendSessionSnapshot(sessionId, session.exportMessages());
     console.log();
   }
 
@@ -146,6 +230,7 @@ program
   .option("--log-level <level>", "Log level: debug|info|warn|error|silent", "info")
   .option("--log-file <file>", "Log output file path")
   .option("--teammate <name>", "Run as a teammate agent (used by spawnTeammate)")
+  .option("--resume [sessionId]", "Resume a previous JSONL session (defaults to latest)")
   .action(async (prompt: string | undefined, options: {
     model: string;
     yolo?: boolean;
@@ -155,6 +240,7 @@ program
     logLevel?: string;
     logFile?: string;
     teammate?: string;
+    resume?: boolean | string;
   }) => {
     // 配置日志系统
     const levelMap: Record<string, LogLevel> = {
@@ -304,13 +390,32 @@ program
       loader,
     );
 
+    const resumeValue = options.resume;
+    const sessionId = typeof resumeValue === "string"
+      ? resumeValue
+      : resumeValue
+        ? latestSessionId() ?? createSessionId()
+        : createSessionId();
+
+    if (resumeValue) {
+      const restored = loadSessionMessages(sessionId);
+      if (restored.length > 0) {
+        session.importMessages(restored);
+        console.log(chalk.dim(`Resumed session ${sessionId} (${restored.length} messages).`));
+      } else {
+        console.log(chalk.dim(`No existing session found for ${sessionId}; starting new.`));
+      }
+    }
+
     if (prompt) {
       // 非交互模式：执行单次对话后退出
       await session.chat(prompt);
+      appendSessionSnapshot(sessionId, session.exportMessages());
+      console.log(chalk.dim(`Session saved: ${sessionPath(sessionId)}`));
       await session.end();
     } else {
       // 交互模式：启动 REPL
-      await repl(session);
+      await repl(session, sessionId);
     }
   });
 
