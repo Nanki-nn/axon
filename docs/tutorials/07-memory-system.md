@@ -345,6 +345,6 @@ Agent 应该调用 `memory_list()` 返回所有记忆。
 
 ---
 
-**上一篇**：[Skill 系统：注入专业能力](./05-skill-system.md) → **下一篇**：[多 Agent 协作：从独奏到交响](./07-multi-agent-collaboration.md)
+**上一篇**：[Skill 系统：注入专业能力](./05-skill-system.md) → **下一篇**：[多 Agent 协作：从独奏到交响](./08-multi-agent-collaboration)
 
 一个 Agent 不够用怎么办？多个 Agent 怎么找到对方、怎么发消息、怎么分工？用 MCP 协议。

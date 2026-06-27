@@ -364,6 +364,6 @@ Agent 应该会用 `skill-creator`（或者直接写文件）来创建：
 
 ---
 
-**上一篇**：[DAG 任务规划：拆解复杂目标](./04-task-planning.md) → **下一篇**：[记忆系统：让 Agent 记住你](./06-memory-system.md)
+**上一篇**：[DAG 任务规划：拆解复杂目标](./04-task-planning.md) → **下一篇**：[记忆系统：让 Agent 记住你](./07-memory-system)
 
 Agent 每次对话压缩后就失忆了。怎么让它记住你的名字、偏好、项目决策？记忆系统就是干这个的。
