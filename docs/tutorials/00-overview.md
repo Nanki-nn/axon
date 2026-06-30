@@ -23,6 +23,7 @@
 | 05 | Skill 系统 | 注入专业能力 | 技能定义、条件匹配、加载执行 |
 | 06 | 记忆系统 | 让 Agent 记住你 | 记忆类型、存储检索、持久化 |
 | 07 | 多 Agent 协作 | 从独奏到交响 | 通信协议、任务分发、子 Agent 生命周期 |
+| 09 | 流式输出 | 让 Agent 边想边说 | Streaming chunk、工具调用拼接、重试、AbortSignal |
 
 ## 模块关系图
 
@@ -33,6 +34,7 @@ flowchart TB
     LOOP --> TOOLS[工具系统<br>注册 · 校验 · 分发]
     LOOP --> SKILLS[Skill 系统<br>专业能力注入]
     LOOP --> MEM[记忆系统<br>结构化存储]
+    LOOP --> STREAM[流式输出<br>chunk · retry · abort]
 
     TOOLS --> PERM[权限/安全<br>检查 · 保护 · 确认]
     TOOLS --> TASK[任务规划<br>DAG 依赖编排]
@@ -46,6 +48,7 @@ flowchart TB
     style SKILLS fill:#F39C12,color:#fff
     style MEM fill:#1ABC9C,color:#fff
     style COLLAB fill:#E91E63,color:#fff
+    style STREAM fill:#3498DB,color:#fff
 ```
 
 ## 阅读顺序

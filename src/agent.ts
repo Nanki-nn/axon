@@ -138,6 +138,67 @@ interface ApiResult {
   };
 }
 
+export interface RetryEvent {
+  attempt: number;
+  maxRetries: number;
+  reason: string;
+  delayMs: number;
+}
+
+export interface SessionEvents {
+  onTextDelta?: (text: string) => void;
+  onToolCallDelta?: (delta: { name?: string; argumentsDelta?: string }) => void;
+  onRetry?: (event: RetryEvent) => void;
+}
+
+export function isRetryableApiError(error: any): boolean {
+  const status = error?.status ?? error?.statusCode;
+  if ([429, 503, 529].includes(status)) return true;
+  if (["ECONNRESET", "ETIMEDOUT"].includes(error?.code)) return true;
+  const message = String(error?.message ?? "").toLowerCase();
+  return message.includes("overloaded") || message.includes("temporarily unavailable");
+}
+
+function retryReason(error: any): string {
+  return error?.status ? `HTTP ${error.status}` : error?.code || error?.message || "network error";
+}
+
+async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+    }
+  });
+}
+
+export async function withApiRetry<T>(
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+  onRetry?: (event: RetryEvent) => void,
+  maxRetries = 3,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      if (signal?.aborted || attempt >= maxRetries || !isRetryableApiError(error)) throw error;
+      const delayMs = Math.min(1000 * 2 ** attempt, 30_000) + Math.floor(Math.random() * 1000);
+      onRetry?.({
+        attempt: attempt + 1,
+        maxRetries,
+        reason: retryReason(error),
+        delayMs,
+      });
+      await sleepWithAbort(delayMs, signal);
+    }
+  }
+}
+
 /**
  * Session 是一次完整的 Agent 会话。
  * 它维护对话历史（messages[]）、持有 LLM 客户端，并驱动"LLM → 工具 → LLM"的循环。
@@ -178,6 +239,16 @@ export class Session {
     baseURL?: string,
     client?: OpenAI,
     skillLoader?: SkillLoader,
+    private events: SessionEvents = {
+      onTextDelta: (text) => process.stdout.write(text),
+      onToolCallDelta: (delta) => {
+        if (delta.name) process.stdout.write(chalk.cyan(`\n⚙ ${delta.name}`));
+        if (delta.argumentsDelta) process.stdout.write(".");
+      },
+      onRetry: (event) => {
+        console.log(chalk.yellow(`\nRetrying API call ${event.attempt}/${event.maxRetries} after ${event.reason}...`));
+      },
+    },
   ) {
     this.client = client ?? new OpenAI({
       apiKey,
@@ -551,6 +622,19 @@ export class Session {
     finishReason: string;
     usage?: ApiResult["usage"];
   }> {
+    return withApiRetry(
+      () => this.callApiOnce(),
+      this.abortController?.signal,
+      this.events.onRetry,
+    );
+  }
+
+  private async callApiOnce(): Promise<{
+    content: string;
+    toolCalls: ToolCall[];
+    finishReason: string;
+    usage?: ApiResult["usage"];
+  }> {
     const stream = await this.client.chat.completions.create({
       model: this.model,
       messages: [
@@ -582,7 +666,7 @@ export class Session {
 
       // 文字内容：实时输出到终端
       if (delta.content) {
-        process.stdout.write(delta.content);
+        this.events.onTextDelta?.(delta.content);
         content += delta.content;
       }
 
@@ -592,17 +676,17 @@ export class Session {
           if (!toolCallMap[tc.index]) {
             // 第一个分片包含工具名，后续分片追加参数
             toolCallMap[tc.index] = { id: tc.id ?? "", name: tc.function?.name ?? "", arguments: "" };
-            process.stdout.write(chalk.cyan(`\n⚙ ${tc.function?.name}`));
+            this.events.onToolCallDelta?.({ name: tc.function?.name ?? "" });
           }
           if (tc.function?.arguments) {
             toolCallMap[tc.index].arguments += tc.function?.arguments;
-            process.stdout.write(".");
+            this.events.onToolCallDelta?.({ argumentsDelta: tc.function.arguments });
           }
         }
       }
     }
 
-    process.stdout.write("\n");
+    this.events.onTextDelta?.("\n");
     return { content, toolCalls: Object.values(toolCallMap), finishReason, usage };
   }
 }

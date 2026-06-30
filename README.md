@@ -1,7 +1,9 @@
 # axon
-![Axon CLI](docs/assets/axon.png)
 
-> axon 是一个跑在本地命令行的 AI Agent。
+> axon 是一个类似 Claude Code 的通用 AI Agent，跑在你的终端里。支持多模型接入、工具调用、MCP 扩展、长期记忆和 DAG 任务规划，覆盖从代码读写到自定义技能注入的各类自动化场景。
+>
+> 配套 10 篇教程从零讲解 Agent Loop、工具系统、权限安全、上下文压缩等核心设计，帮你真正理解 AI Agent 的工程实现。
+
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Node](https://img.shields.io/badge/Node-18%2B-339933)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)
@@ -12,127 +14,155 @@
 
 **🚧 项目正在积极开发中，欢迎 Star、提 Issue 和 PR 参与共建！**
 
-[快速开始](#-快速开始) · [模型切换](#-切换模型) · [配置说明](#-配置文件) · [扩展机制](#-扩展机制) · [内部机制](#-内部机制) · [参与贡献](#-参与贡献)
+[Agent 能力](#-agent-能力) · [快速开始](#-快速开始) · [模型切换](#-切换模型) · [配置说明](#-配置文件) · [架构设计](#-架构设计) · [扩展机制](#-扩展机制) · [参与贡献](#-参与贡献)
 
 ---
 
-axon 是一个面向本地工作区和自动化任务的 **CLI Agent 框架**。统一接入 OpenAI / Anthropic / Gemini / DeepSeek / Qwen / MiniMax 等主流模型，原生支持 **工具调用、MCP 扩展、Skill 渐进披露、长期记忆和项目级指令注入**。
+## ✨ Agent 能力
 
-## 📦 项目简介
-
-axon 是单仓 TypeScript 项目，纯 Node 运行，零浏览器依赖：
-
-- **CLI 入口** (`src/cli.ts`)：参数解析、子系统初始化、REPL 与单次执行
-- **Agent 内核** (`src/agent.ts`)：多轮工具调用循环、流式事件输出、错误恢复
-- **工具集** (`src/tools/`)：文件读写、glob、grep、bash、todo、子任务等
-- **扩展层**：MCP 客户端、Skill 加载器、Hook 生命周期、长期记忆
-
-### ✨ 核心特性
-
-| 模块 | 实现要点 | 相关文件 |
-|---|---|---|
-| **🤖 多模型 Agent Loop** | 统一接入 OpenAI / Anthropic / Gemini / DeepSeek / Qwen / MiniMax；流式事件、工具执行、错误恢复、多轮推理 | `agent.ts` `providers/` |
-| **🔧 Tool-use 工具系统** | 文件读写编辑、glob 检索、grep 搜索、Bash 执行；Schema 注册、权限校验、危险命令检测 | `tools/` |
-| **🔌 MCP 扩展** | 读取本地配置自动 spawn MCP Server 子进程；JSON-RPC 握手、工具发现与注册 | `mcp.ts` |
-| **🎓 Skill 技能系统** | `SKILL.md + scripts/references/assets` 目录；元数据发现、`skill_list` / `skill_read` 渐进披露 | `skills.ts` `tools/index.ts` |
-| **🪝 Hook 生命周期** | 工具调用前后、LLM 采样后、压缩前后、单轮 / 会话结束等事件钩子 | `hooks.ts` `plugins/` |
-| **💾 长期记忆 & Auto-Dream** | 会话摘要落盘；满足条件后台触发 LLM 整合，注入下次会话 system prompt | `memory.ts` `plugins/auto-dream.ts` |
-| **📉 3 层上下文压缩** | L1 消息裁剪 → L2 工具结果占位符 → L3 大结果持久化 | `compaction.ts` |
-
-### 🧭 机制拆解文章
-
-后续会围绕 axon 的核心机制持续补充设计文章，记录从最小可用 Agent 到可产品化本地助手的实现细节。
-
-| 主题 | 关注问题 | 当前入口 | 文章状态 |
-|---|---|---|---|
-| Agent Loop | 模型如何在“思考 → 工具调用 → 观察结果 → 继续推理”之间循环 | `src/agent.ts` | 计划中 |
-| 任务规划 | 如何把多步骤任务拆解、跟踪状态，并在执行中持续更新进度 | `src/task.ts` `src/tools/todo.ts` | 计划中 |
-| 工具系统 | 工具 schema、注册、分发、结果回填和错误恢复如何设计 | `src/tools/` | 计划中 |
-| 权限与安全 | 命令确认、危险操作拦截、文件访问边界和执行风险如何控制 | `src/permissions.ts` | [设计文章](docs/permission-security-design.md) |
-| 记忆系统 | 长期记忆如何保存、索引、召回、注入，以及如何做离线评测 | `src/features/memory/` | [设计文章](docs/memory-system-design.md) |
-| 技能系统 | `SKILL.md` 如何实现渐进披露，让模型按需加载领域能力 | `src/skills.ts` | 计划中 |
-
-### 🧰 模型可调用的工具
-
-| 工具 | 说明 |
+| 模块 | 核心设计 |
 |---|---|
-| `bash` | 执行 shell，危险命令需确认 |
-| `read_file` / `write_file` | 读写文件 |
-| `edit_file` | 精确字符串替换（多处匹配时报错） |
-| `list_files` | glob 列文件 |
-| `search_files` | grep 搜索 |
-| `skill_list` / `skill_read` | 浏览和加载 skills |
-| `todo_write` | 任务规划与进度追踪 |
+| **🤖 Agent Loop** | 思考→行动→观察闭环；硬边界（25 轮最大）；流式输出 + 事件解耦 |
+| **🔧 工具系统** | ToolSpec 契约 + Schema 自动生成；只读/编辑/Shell 三级分类；延迟加载；并发执行 |
+| **🛡️ 权限系统** | 策略链（自定义规则→执行模式→危险评估）；5 种模式；审计日志 |
+| **📋 任务规划** | DAG 任务模型：`blockedBy` 依赖、单 in_progress 限制、自动解除阻塞 |
+| **🎓 Skill 系统** | 目录 + Markdown 结构；基于 `## 用途` 的精准匹配；`skill-creator` 自举扩展 |
+| **💾 记忆系统** | 文件型三段存储；4 种记忆类型；压缩不丢 |
+| **🤝 多 Agent** | MCP 协议通信；点对点/广播/流水线三种协作模式；Spawn 动态创建子 Agent |
+| **📉 上下文压缩** | 三层递进：无损裁剪→摘要压缩→结构化记忆；"迷失在中间"防御 |
+| **📜 System Prompt** | 7 层递进结构：身份→行为边界→任务管理→工具偏好→输出精简 |
+
+配套教学系列 **《从零到一实现一个 AI Agent 框架》**，从最朴素的问题出发，逐步推导每个模块的设计决策：
+
+| # | 标题 | 核心内容 |
+|---|---|---|
+| 01 | [Agent Loop](docs/tutorials/01-agent-loop.md) | 思考→行动→观察闭环，循环边界 |
+| 02 | [工具系统](docs/tutorials/02-tool-system.md) | ToolSpec 契约，Schema 生成，结果治理 |
+| 03 | [System Prompt](docs/tutorials/03-system-prompt.md) | 反模式接种，爆炸半径框架，7 层递进结构 |
+| 04 | [任务规划](docs/tutorials/04-task-planning.md) | DAG 任务模型，`blockedBy` 依赖，持久化 |
+| 05 | [权限系统](docs/tutorials/06-permission-system.md) | 策略链，5 种执行模式，审计日志 |
+| 06 | [上下文管理](docs/tutorials/05-context-management.md) | 三层递进压缩，"迷失在中间"防御 |
+| 07 | [Skill 系统](docs/tutorials/05-skill-system.md) | Markdown 技能定义，按需加载，自举扩展 |
+| 08 | [记忆系统](docs/tutorials/07-memory-system.md) | 4 种记忆类型，文件存储，压缩不丢 |
+| 09 | [多 Agent 协作](docs/tutorials/08-multi-agent-collaboration.md) | MCP 通信协议，三种协作模式，Spawn |
+| 10 | [流式输出](docs/tutorials/09-streaming.md) | Streaming chunk，工具调用拼接，重试，AbortSignal |
+
+## 🔬 架构设计
+
+### Agent Loop 工作流
+
+```mermaid
+flowchart TB
+    START([用户输入]) --> INIT[加载系统提示词<br>记忆注入 · Skill 激活]
+    INIT --> LOOP{检查 max_turns}
+
+    LOOP -->|未超限| LLM[调用 LLM<br>流式输出 · 事件回调]
+    LOOP -->|超限| FORCE_END[强制结束]
+
+    LLM --> PARSE[解析响应]
+    PARSE --> TOOL{有工具调用？}
+
+    TOOL -->|是| PERM[权限检查]
+    PERM --> DENY{策略链决策}
+
+    DENY -->|deny| LOG[审计记录]
+    LOG --> LOOP
+
+    DENY -->|confirm| USER[用户确认]
+    USER -->|同意| EXEC[执行工具]
+    USER -->|拒绝| LOOP
+
+    DENY -->|allow| EXEC
+    EXEC --> RESULT[结果截断/脱敏]
+    RESULT --> LOOP
+
+    TOOL -->|否| STOP{检查终止条件}
+
+    STOP -->|LLM 主动停止| END_G([返回最终回复])
+    STOP -->|未停止| COMPRESS{上下文超限？}
+    COMPRESS -->|是| L1[L1 无损裁剪]
+    L1 --> L2[L2 摘要压缩]
+    L2 --> L3[L3 结构化记忆]
+    L3 --> LOOP
+    COMPRESS -->|否| LOOP
+
+    END_G --> DONE([完成])
+    FORCE_END --> DONE
+```
+
+### System Prompt 的 7 层设计
+
+| 层 | 内容 | 作用 |
+|----|------|------|
+| 1️⃣ Identity | 你是谁，定位是什么 | 建立角色认知 |
+| 2️⃣ System | 反模式接种 + 爆炸半径框架 | 设定行为边界 |
+| 3️⃣ Doing Tasks | 任务管理系统（DAG 模型） | 拆解复杂目标 |
+| 4️⃣ Actions | 工具偏好映射表（用 `read_file` 而非 `cat`） | 选择正确工具 |
+| 5️⃣ Using Tools | 各工具的用途和限制 | 具体操作指引 |
+| 6️⃣ Tone | 输出风格要求 | 统一表达方式 |
+| 7️⃣ Output Efficiency | 输出精简要求 | 减少废话 |
+
+### 权限策略链
+
+```mermaid
+flowchart TD
+    INPUT[工具调用请求] --> RULE{自定义规则<br>allow / deny}
+
+    RULE -->|deny| DENY1[❌ 拒绝]
+    RULE -->|allow| ALLOW1[✅ 允许]
+    RULE -->|未命中| MODE{执行模式}
+
+    MODE -->|plan| PLAN["❌ 拒绝写入和 Shell"]
+    MODE -->|dont-ask| DONTASK["危险操作自动拒绝"]
+    MODE -->|yolo| YOLO["✅ 全部允许"]
+    MODE -->|accept-edits| ACCEPT["编辑自动放行<br>Shell 危险确认"]
+    MODE -->|default| DEFAULT["只读允许<br>写新文件确认<br>Shell 危险确认"]
+```
+
+### 上下文三层压缩
+
+```
+L1 无损裁剪 → 省 30-50%，0 信息损失
+    保留头 3 条 + 尾部，丢弃中间轮次
+     如果不够 ↓
+L2 摘要压缩 → 再省 60-80%，保留关键信息
+    按语义段落选择性摘要，不压缩核心工具结果
+     如果还不够 ↓
+L3 结构化记忆 → 极度精简，只保留必须记住的
+    提炼到 ~/.axon/memory/，下次会话恢复
+```
 
 ## 🚀 快速开始
 
 ### 环境要求
 
-在开始之前，请确保你的开发环境满足以下要求：
-
 - **Node.js**：18 或以上版本
-- **npm** / **pnpm** / **yarn**：任选其一
 - **API Key**：DeepSeek / OpenAI / Anthropic 等任一模型厂商的 key
 
 ### 1️⃣ 安装
 
-**方式一：从 npm 安装（发布后推荐）**
-
+**全局安装：**
 ```bash
 npm install -g axon-cli
 ```
 
-安装后会得到 `axon` 命令：
-
-```bash
-axon --help
-```
-
-**方式二：从源码安装（当前开发推荐）**
-
+**从源码安装：**
 ```bash
 git clone https://github.com/yourusername/axon
 cd axon
-npm install
-npm run build
-npm link
-```
-
-也可以不用 `npm link`，直接在项目目录里执行：
-
-```bash
-npm run dev -- "你好"
+npm install && npm run build && npm install -g .
 ```
 
 ### 2️⃣ 配置 API Key
 
-任选其一即可：
-
-**方式一：环境变量**
-
 ```bash
+# 方式一：全局配置文件（推荐）
+mkdir -p ~/.axon
+echo '{ "provider": "deepseek", "apiKey": "your-key-here" }' > ~/.axon/config.json
+
+# 方式二：环境变量
 export DEEPSEEK_API_KEY=your-key-here
 ```
-
-**方式二：项目配置**
-
-```bash
-mkdir -p .axon
-cp .axon/config.example.json .axon/config.json
-```
-
-然后编辑 `.axon/config.json`：
-
-```json
-{
-  "provider": "deepseek",
-  "model": "deepseek-chat",
-  "apiKey": "${DEEPSEEK_API_KEY}",
-  "baseURL": "https://api.deepseek.com"
-}
-```
-
-> 推荐在配置文件中使用 `${ENV_VAR}` 引用环境变量，避免把 key 明文写进项目文件。
 
 ### 3️⃣ 开始使用
 
@@ -140,14 +170,14 @@ cp .axon/config.example.json .axon/config.json
 axon                                        # 进入交互 REPL
 axon "解释这段代码"                          # 单次执行
 axon --yolo "批量重命名 src/ 下的文件"       # 跳过所有确认
-axon --plan "重构认证模块"                   # 执行前展示计划，逐步确认
+axon --plan "重构认证模块"                   # 仅分析，不执行
 axon --model anthropic:claude-3-5-sonnet "review 代码"
-npm run dev -- "prompt"                     # 源码开发时免 build
+npm run dev -- "prompt"                     # 开发时免 build
 ```
 
 ## 🔄 切换模型
 
-格式 `--model provider:model`，或在 `.axon/config.json` 里配默认值。
+格式 `--model provider:model`，或在 `axon.config.json` 里配默认值。
 
 | provider | 模型示例 | 环境变量 |
 |---|---|---|
@@ -161,12 +191,9 @@ npm run dev -- "prompt"                     # 源码开发时免 build
 
 ## ⚙️ 配置文件
 
-配置分两层，本地覆盖全局，`mcpServers` 和 `plugins` 合并。
+配置分两层，项目配置覆盖全局，`mcpServers` 和 `plugins` 合并。
 
-### 全局配置 `~/.axon/config.json`
-
-对所有项目生效：
-
+**全局配置 `~/.axon/config.json`**（对所有项目生效）：
 ```json
 {
   "provider": "deepseek",
@@ -175,10 +202,7 @@ npm run dev -- "prompt"                     # 源码开发时免 build
 }
 ```
 
-### 项目配置 `.axon/config.json`
-
-放在项目根目录的 `.axon/` 下，覆盖全局：
-
+**项目配置 `axon.config.json`**（放在项目根目录，覆盖全局）：
 ```json
 {
   "model": "deepseek-reasoner",
@@ -199,24 +223,27 @@ npm run dev -- "prompt"                     # 源码开发时免 build
 
 ### 🎓 Skills
 
-`.axon/skills/<name>/SKILL.md`，启动时自动发现，模型通过 `skill_list` / `skill_read` 按需加载。
+`.agents/skills/<name>/SKILL.md`，启动时自动发现。
 
 ```
-.axon/skills/
+.agents/skills/
 └── company-valuation/
-    ├── SKILL.md        # frontmatter(name, description) + 正文
-    ├── references/     # skill_read 时列出文件名供模型按需读取
+    ├── SKILL.md       # 用途 + 步骤 + 注意事项
+    ├── references/    # skill_read 时列出文件名
     └── scripts/
 ```
 
+Skill 之间可以互相引用。`skill-creator` 本身也是一个 Skill——实现自举扩展。
+
 ### 🔌 MCP
 
-`.axon/config.json` 里配 `mcpServers`，启动时自动 spawn 子进程，工具名格式 `serverName__toolName`。内置轻量 JSON-RPC，**不依赖 MCP SDK**。
+`axon.config.json` 里配 `mcpServers`，启动时自动 spawn 子进程，工具名格式 `serverName__toolName`。内置轻量 JSON-RPC，**不依赖 MCP SDK**。
 
 ### 💾 记忆
 
-- 每轮结束追加摘要到 `.axon/memory/dream/sessions/YYYY-MM-DD.md`
-- 触发条件（≥ 10 次会话 或 距上次 > 24h）：后台加文件锁，LLM 整合进 `.axon/memory/dream/memory.md`
+- 4 种记忆类型：用户、反馈、项目、参考
+- 每轮结束追加摘要到 `~/.axon/memory/sessions/YYYY-MM-DD.md`
+- 触发条件（≥ 10 次会话 或 距上次 > 24h）：后台加文件锁，LLM 整合进 `~/.axon/memory/memory.md`
 - 启动时自动注入 system prompt（最多 8KB）
 
 ### 🪝 插件
@@ -230,64 +257,7 @@ module.exports = {
 };
 ```
 
-配在 `.axon/config.json` 的 `plugins` 数组里。
-
-## 🔐 权限与安全
-
-axon 的工具调用会先经过统一权限层，再进入具体工具执行。默认策略是：只读工具直接允许，高风险 shell、后台命令、写入新文件、外部 MCP 工具需要确认；被拒绝或取消的工具调用会写入审计日志。
-
-### 权限模式
-
-| 模式 | 启动参数 | 行为 |
-|---|---|---|
-| default | 默认 | 只读工具直接执行，高风险操作需要确认 |
-| plan | `--plan` | 只读规划模式，阻止写入和 shell |
-| yolo | `--yolo` | 跳过确认，适合完全信任的本地环境 |
-| accept-edits | `--accept-edits` | 自动允许文件编辑，仍确认危险 shell |
-| dont-ask | `--dont-ask` | 非交互模式，需要确认的操作自动拒绝 |
-
-### Allow / Deny 规则
-
-可以在 `~/.axon/settings.json`、项目 `.axon/settings.json` 或 `.axon/config.json` 中配置权限规则。`deny` 优先级高于 `allow`。
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "bash(npm test*)",
-      "read_file"
-    ],
-    "deny": [
-      "bash(npm publish*)",
-      "bash(git push*)",
-      "write_file(.env*)"
-    ]
-  }
-}
-```
-
-规则格式：
-
-| 格式 | 含义 |
-|---|---|
-| `tool` | 匹配该工具的所有调用 |
-| `tool(value)` | 精确匹配工具输入中的 command / path / filename |
-| `tool(prefix*)` | 前缀匹配 |
-| `tool(*middle*)` | 通配匹配 |
-
-### 文件写入保护
-
-对已有文件执行 `write_file` 或 `edit_file` 前，必须先调用 `read_file`。axon 会记录读取时的 `mtime`，如果文件在读取后被外部修改，本次写入会被拒绝并要求重新读取。
-
-### 审计日志与 Secret Mask
-
-所有工具调用都会记录到：
-
-```text
-.axon/security/audit.log
-```
-
-日志会保存工具名、输入摘要、权限决策和输出预览。常见 API key、token、Bearer 凭证和私钥内容会被自动替换为 `[REDACTED]`。
+配在 `axon.config.json` 的 `plugins` 数组里。
 
 ### 📋 项目上下文
 
@@ -302,18 +272,12 @@ axon 的工具调用会先经过统一权限层，再进入具体工具执行。
 - 🐛 **报告 Bug**：遇到问题请提 Issue，附上复现步骤和日志
 - 💡 **提出需求**：有好的功能想法欢迎开 Issue 讨论
 - 🔧 **提交代码**：Fork 仓库后开发新功能或修复 Bug，完成后发 Pull Request
-- 📖 **完善文档**：改进 README、补充注释、优化示例等
-- 🎓 **贡献 Skill**：在 `.axon/skills/` 下贡献你的领域技能
+- 📖 **完善文档**：改进 README、补充教程、优化示例
+- 🎓 **贡献 Skill**：在 `.agents/skills/` 下贡献你的领域技能
 
-### 开发规范
-
-- 注释用中文，函数保持单一职责，超过 40 行考虑拆分
-- 工具函数放 `src/tools/`，新增工具需同时在 `index.ts` 注册
-- 提交前确保 `npm run build` 和 `npm test` 通过
-- Commit message 清晰描述改动内容
+### 本地开发
 
 ```bash
-# 本地开发
 npm install
 npm run dev -- "test prompt"     # 免 build 直接跑
 npm test                         # 跑 vitest 单测
@@ -328,72 +292,4 @@ npm run build                    # 编译到 dist/
 
 ---
 
-```
-src/
-├── cli.ts          # 入口：参数解析、子系统初始化
-├── agent.ts        # Session + agent loop + 流式输出
-├── compaction.ts   # 三层压缩流水线
-├── context.ts      # AGENTS.md 层级加载
-├── mode.ts         # yolo / default / plan
-├── skills.ts       # SkillLoader
-├── hooks.ts        # HookSystem + AxonPlugin 接口
-├── memory.ts       # 记忆读写 + Dream 整合
-├── mcp.ts          # MCP JSON-RPC 客户端
-├── providers/
-│   ├── index.ts    # createClient 工厂
-│   └── anthropic.ts
-├── plugins/
-│   ├── session-counter.ts
-│   └── auto-dream.ts
-└── tools/
-    ├── index.ts    # 注册 + dispatch
-    ├── bash.ts
-    └── files.ts
-```
-
-### 🔄 对话压缩
-
-3 层压缩机制，防止 context window 溢出：
-
-- **L1 microCompact** — 每轮静默执行，将早期工具结果替换为摘要
-- **L2 compactHistory** — 体积超 80K 时自动触发，或手动调用 `compact` 工具
-- 保留最近 3 条工具结果保证交互连贯
-
-### 👥 多 Agent 协作（Teams）
-
-创建和管理 AI 队友，通过文件收件箱异步通信：
-
-```
-partner_create   → 创建队友配置
-partner_spawn    → 启动队友子进程
-partner_send     → 发送消息
-partner_read_inbox → 读取回复
-partner_broadcast → 广播消息
-partner_list     → 查看所有队友
-partner_remove   → 移除队友
-```
-
-队友作为独立子进程运行，配置持久化在 `.axon/teams/team.json`。
-
-### ⏳ 后台任务
-
-长时间运行的命令不阻塞对话：
-
-```
-background_run "npm install"      # 后台跑，拿 taskId
-check_background "bg_1"           # 查状态和输出
-```
-
-Agent Loop 每次调用 LLM 前自动注入已完成的后台任务摘要。
-
-## Skills（技能列表）
-
-执行 `skill_list` 查看所有可用技能。
-
-## 项目规范
-
-- TypeScript + Node.js，DeepSeek API（OpenAI 兼容格式）
-- 构建：`tsc`，开发运行：`tsx`
-- 注释用中文
-- 函数保持单一职责，超过 40 行考虑拆分
-- 新增工具需同时在 `src/tools/index.ts` 注册
+Made with ❤️ for hackers who live in the terminal

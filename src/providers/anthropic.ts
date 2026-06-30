@@ -112,6 +112,7 @@ async function* anthropicToOpenAIStream(
   system: string,
   messages: object[],
   tools: object[],
+  options?: { signal?: AbortSignal },
 ): AsyncIterable<OpenAI.Chat.ChatCompletionChunk> {
   const stream = anthropic.messages.stream({
     model,
@@ -119,7 +120,7 @@ async function* anthropicToOpenAIStream(
     messages,
     tools,
     max_tokens: 8096,
-  });
+  }, options);
 
   // 维护工具调用的 index 映射（Anthropic 用 id，OpenAI 用数组 index）
   const toolIndexMap = new Map<string, number>();
@@ -174,6 +175,25 @@ async function* anthropicToOpenAIStream(
         : stopReason === "end_turn" ? "stop"
         : stopReason ?? "stop";
       yield makeChunk({ finish_reason: finishReason, delta: {} });
+      continue;
+    }
+
+    if (event.type === "message_stop") {
+      const usage = (event as any).message?.usage;
+      if (usage) {
+        yield {
+          id: "anthro",
+          object: "chat.completion.chunk",
+          created: Math.floor(Date.now() / 1000),
+          model: "anthropic",
+          choices: [],
+          usage: {
+            prompt_tokens: usage.input_tokens ?? 0,
+            completion_tokens: usage.output_tokens ?? 0,
+            total_tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
+          },
+        } as OpenAI.Chat.ChatCompletionChunk;
+      }
     }
   }
 }
@@ -233,10 +253,10 @@ export function createAnthropicAdapter(apiKey: string, model: string): OpenAI {
       if (prop === "chat") {
         return {
           completions: {
-            create: (params: OpenAI.Chat.ChatCompletionCreateParamsStreaming) => {
+            create: (params: OpenAI.Chat.ChatCompletionCreateParamsStreaming, options?: { signal?: AbortSignal }) => {
               const { system, messages } = toAnthropicMessages(params.messages);
               const tools = toAnthropicTools(params.tools ?? []);
-              return anthropicToOpenAIStream(anthropic, model, system, messages, tools);
+              return anthropicToOpenAIStream(anthropic, model, system, messages, tools, options);
             },
           },
         };
