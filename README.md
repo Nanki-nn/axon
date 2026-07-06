@@ -1,5 +1,7 @@
 # axon
 
+
+
 > axon 是一个类似 Claude Code 的通用 AI Agent，跑在你的终端里。支持多模型接入、工具调用、MCP 扩展、长期记忆和 DAG 任务规划，覆盖从代码读写到自定义技能注入的各类自动化场景。
 >
 > 配套 10 篇教程从零讲解 Agent Loop、工具系统、权限安全、上下文压缩等核心设计，帮你真正理解 AI Agent 的工程实现。
@@ -13,6 +15,7 @@
 ![MCP](https://img.shields.io/badge/MCP-compatible-000000)
 
 **🚧 项目正在积极开发中，欢迎 Star、提 Issue 和 PR 参与共建！**
+<img src="cc7c3bccda2fcdc900ce4c189de7b582.png" alt="Axon preview" width="480">
 
 [Agent 能力](#-agent-能力) · [快速开始](#-快速开始) · [模型切换](#-切换模型) · [配置说明](#-配置文件) · [架构设计](#-架构设计) · [扩展机制](#-扩展机制) · [参与贡献](#-参与贡献)
 
