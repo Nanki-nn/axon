@@ -8,6 +8,7 @@ import {
 } from "./files";
 import { TODO_DEFINITION, TODO, taskTools } from "./todo";
 import { DEFINITION as COMPACT_DEF, execute as compactExecute } from "./compact";
+import { WEB_FETCH_DEFINITION, WEB_SEARCH_DEFINITION, webFetch, webSearch } from "./web";
 import { SkillLoader } from "../skills";
 import {
   teamToolHandlers,
@@ -213,6 +214,8 @@ function createBuiltInToolSpecs(): ToolSpec[] {
     spec(EDIT_DEFINITION, (i) => editFile(i.path, i.old_string, i.new_string)),
     readOnly(LIST_DEFINITION, (i) => listFiles(i.pattern)),
     readOnly(SEARCH_DEFINITION, (i) => searchFiles(i.pattern, i.path ?? ".")),
+    readOnly(WEB_SEARCH_DEFINITION, (i) => webSearch(i), { deferred: true }),
+    readOnly(WEB_FETCH_DEFINITION, (i) => webFetch(i), { deferred: true }),
     spec(TODO_DEFINITION, (i) => {
       try {
         return TODO.update(i.items ?? []);

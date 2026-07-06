@@ -26,12 +26,24 @@ describe("tool registry", () => {
     expect(before).toContain("tool_search");
     expect(before).toContain("task_create");
     expect(before).not.toContain("partner_create");
+    expect(before).not.toContain("web_search");
+    expect(before).not.toContain("web_fetch");
 
     const result = await dispatch("tool_search", { query: "partner_create" });
     expect(result).toContain("partner_create");
 
     const after = getDEFINITIONS().map((def: any) => def.function.name);
     expect(after).toContain("partner_create");
+  });
+
+  it("activates deferred web tools through tool_search", async () => {
+    resetDeferredToolActivations();
+
+    const result = await dispatch("tool_search", { query: "web_search" });
+    expect(result).toContain("web_search");
+
+    const after = getDEFINITIONS().map((def: any) => def.function.name);
+    expect(after).toContain("web_search");
   });
 
   it("exposes concurrency metadata for read-only tools", () => {
@@ -41,7 +53,7 @@ describe("tool registry", () => {
 
   it("persists oversized tool results and returns a truncated pointer", async () => {
     const output = await dispatch("bash", {
-      command: "node -e \"process.stdout.write('x'.repeat(60000))\"",
+      command: `"${process.execPath}" -e "process.stdout.write('x'.repeat(60000))"`,
     });
 
     expect(output.length).toBeLessThan(55_000);
