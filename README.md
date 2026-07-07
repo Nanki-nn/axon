@@ -178,6 +178,18 @@ axon --model anthropic:claude-3-5-sonnet "review 代码"
 npm run dev -- "prompt"                     # 开发时免 build
 ```
 
+### 4️⃣ 运行回归评测
+
+```bash
+npm run eval:memory   # 记忆系统离线回归
+npm run eval:web      # web_search / web_fetch 回归
+```
+
+`eval:web` 会跑一组固定的真实 case，检查：
+- 新闻类搜索是否还能返回合理结果
+- 搜索结果是否明显跑偏到无关旧内容
+- 页面抓取是否还能返回可读正文
+
 ## 🔄 切换模型
 
 格式 `--model provider:model`，或在 `axon.config.json` 里配默认值。

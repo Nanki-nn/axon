@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:memory": "tsx src/evals/memory-offline.ts",
+    "eval:web": "tsx src/evals/web-regression.ts",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
     "prepublishOnly": "npm run build"
